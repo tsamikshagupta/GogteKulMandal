@@ -12,7 +12,7 @@ export function Header() {
               <span className="text-white font-bold text-lg">G</span>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-orange-900">GogteKul</h1>
+              <h1 className="text-xl font-bold text-orange-900">GogateKulMandal</h1>
               <p className="text-sm text-orange-700">Family Heritage</p>
             </div>
           </div>

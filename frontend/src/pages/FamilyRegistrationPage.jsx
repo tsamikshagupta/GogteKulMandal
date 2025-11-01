@@ -1413,6 +1413,7 @@ export default function FamilyFormPage() {
         ),
       },
     ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [control, errors, register, formValues]
   );
 
@@ -1441,17 +1442,18 @@ export default function FamilyFormPage() {
     return reachable;
   };
 
-  const getSectionIdFromIndex = (index) => {
-    const sectionIds = [
-      SECTION_IDS.PERSONAL,
-      SECTION_IDS.MARRIED,
-      SECTION_IDS.DIVORCED,
-      SECTION_IDS.WIDOWED,
-      SECTION_IDS.REMARRIED,
-      SECTION_IDS.PARENTS,
-    ];
-    return sectionIds[index] || SECTION_IDS.PERSONAL;
-  };
+  // Commenting out unused function to avoid ESLint warning
+  // const getSectionIdFromIndex = (index) => {
+  //   const sectionIds = [
+  //     SECTION_IDS.PERSONAL,
+  //     SECTION_IDS.MARRIED,
+  //     SECTION_IDS.DIVORCED,
+  //     SECTION_IDS.WIDOWED,
+  //     SECTION_IDS.REMARRIED,
+  //     SECTION_IDS.PARENTS,
+  //   ];
+  //   return sectionIds[index] || SECTION_IDS.PERSONAL;
+  // };
 
   const getVisibleSections = () => {
     const reachable = getReachableSections(formValues);
@@ -1585,7 +1587,7 @@ export default function FamilyFormPage() {
               
               {/* Message */}
               <p className="text-slate-600 mb-6 leading-relaxed">
-                Thank you for registering with Gogte Kulamandal. Your application has been submitted for review. 
+                Thank you for registering with GogateKulMandal. Your application has been submitted for review. 
                 You will receive an email notification once your registration is approved by our admin team.
               </p>
               

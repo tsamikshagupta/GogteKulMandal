@@ -58,10 +58,10 @@ const CardFamilyTreePage = () => {
         {/* Page Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl md:text-5xl font-bold text-gray-800 mb-4">
-            Gogte Family Tree
+            GogateKulMandal Family Tree
           </h1>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Explore the Gogte family heritage through generations. Click on any family member to explore their profile.
+            Explore the GogateKulMandal family heritage through generations. Click on any family member to explore their profile.
           </p>
         </div>
 

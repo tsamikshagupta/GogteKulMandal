@@ -717,7 +717,7 @@ app.get('/api/admin/news', verifyToken, requireAdmin, async (req, res) => {
     const news = [
       {
         id: 1,
-        title: "Gogte Kulamandal Annual Meeting 2024",
+        title: "GogateKulMandal Annual Meeting 2024",
         content: "Our kulamandal's annual meeting was successfully concluded.",
         author: "Narayan Shankar",
         category: "announcement",

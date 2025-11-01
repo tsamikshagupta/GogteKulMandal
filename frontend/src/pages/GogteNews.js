@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { Filter, Search, Calendar, Users, Star, RefreshCw, User, Clock, Heart, MessageCircle, X, Send } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { AddNewsModal } from './AddNewsModal';
-import { NewsCard } from './NewsCard';
 import Footer from '../components/Footer';
 
 export default function GogteNewsPage() {
@@ -12,7 +11,7 @@ export default function GogteNewsPage() {
   const [news, setNews] = useState([
     {
       id: 1,
-      title: "Gogte Kulamandal Annual Meeting 2024",
+      title: "GogateKulMandal Annual Meeting 2024",
       content: "Our kulamandal's annual meeting was successfully concluded. The participation of all family members made this event extremely joyful. Important decisions for the new year were discussed.",
       author: "Narayan Shankar",
       category: "announcement",

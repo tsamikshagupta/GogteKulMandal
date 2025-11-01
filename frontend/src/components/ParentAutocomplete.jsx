@@ -76,8 +76,11 @@ const ParentAutocomplete = ({
       }
 
       debounceTimerRef.current = setTimeout(() => {
-        if (value.trim()) {
-          searchMembers(value);
+        const trimmed = value.trim();
+        // Only trigger search for reasonably sized input to reduce requests
+        // and improve perceived performance on large datasets.
+        if (trimmed && trimmed.length >= 2) {
+          searchMembers(trimmed);
         } else {
           setSuggestions([]);
           setIsOpen(false);
