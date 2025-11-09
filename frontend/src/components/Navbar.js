@@ -408,7 +408,7 @@ const Navbar = () => {
                           DBA Dashboard
                         </Link>
                       );
-                    } else if (role === 'admin') {
+                    } else if (role === 'admin' || role === 'master_admin') {
                       // Admin users see Admin Dashboard
                       return (
                         <Link 

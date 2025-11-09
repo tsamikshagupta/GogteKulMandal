@@ -1,8 +1,14 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import { ObjectId } from 'mongodb';
 
 export default function createAuthRouter(connectToMongo) {
   const router = express.Router();
+
+  const masterAdminUsername = (process.env.MASTER_ADMIN_USERNAME || 'master_admin').trim() || 'master_admin';
+  const masterAdminPassword = process.env.MASTER_ADMIN_PASSWORD || 'MasterAdmin@123';
+  const masterAdminSerNo = (process.env.MASTER_ADMIN_SERNO || 'ADM').trim() || 'ADM';
+  const masterAdminEmail = (process.env.MASTER_ADMIN_EMAIL || 'master_admin@gogtekulavrutta.app').trim() || 'master_admin@gogtekulavrutta.app';
 
   async function getUsersCollection(db) {
     const configured = (process.env.MONGODB_LOGIN_COLLECTION || process.env.MONGODB_USERS_COLLECTION || process.env.MONGODB_COLLECTION || '').trim();
@@ -142,18 +148,62 @@ export default function createAuthRouter(connectToMongo) {
 
   router.post('/login', async (req, res) => {
     try {
-      console.log('[auth] login attempt:', { email: req.body.email, hasPassword: !!req.body.password });
       const sanitizedEmailInput = sanitizeEmailValue(req.body.email);
       const inputPassword = String(req.body.password || '');
       if (!sanitizedEmailInput || !inputPassword) {
         console.log('[auth] login failed: missing email or password');
         return res.status(400).json({ message: 'Email and password are required' });
       }
+
+      const lowerInput = sanitizedEmailInput.toLowerCase();
+      const masterUsernameLower = masterAdminUsername.toLowerCase();
+      const masterSerNoLower = masterAdminSerNo.toLowerCase();
+      const isMasterAdminAttempt = lowerInput === masterUsernameLower || lowerInput === masterSerNoLower;
+
+      if (isMasterAdminAttempt) {
+        if (inputPassword !== masterAdminPassword) {
+          console.log('[auth] master admin login: invalid password');
+          return res.status(401).json({ message: 'Invalid credentials' });
+        }
+
+        const token = jwt.sign({
+          sub: 'master_admin',
+          email: masterAdminEmail.toLowerCase(),
+          role: 'master_admin',
+          serNo: masterAdminSerNo,
+          username: masterAdminUsername,
+          managedVansh: null,
+          isMasterAdmin: true
+        }, process.env.JWT_SECRET || 'dev_secret', { expiresIn: '7d' });
+
+        return res.json({
+          message: 'Master admin login successful',
+          token,
+          user: {
+            id: 'master_admin',
+            firstName: 'Master',
+            lastName: 'Administrator',
+            email: masterAdminEmail.toLowerCase(),
+            role: 'master_admin',
+            serNo: masterAdminSerNo,
+            username: masterAdminUsername,
+            managedVansh: null,
+            isMasterAdmin: true
+          }
+        });
+      }
+
       if (sanitizedEmailInput === process.env.DBA_EMAIL && inputPassword === process.env.DBA_PASSWORD) {
+        const db = await connectToMongo();
+        const adminsCollection = db.collection('admins');
+        const adminRecord = await adminsCollection.findOne({ email: sanitizedEmailInput });
+        const managedVansh = adminRecord?.managedVansh || null;
+        
         const token = jwt.sign({
           sub: 'dba_admin',
           email: sanitizedEmailInput,
-          role: 'dba'
+          role: 'dba',
+          managedVansh: managedVansh
         }, process.env.JWT_SECRET || 'dev_secret', { expiresIn: '7d' });
         return res.json({
           message: 'DBA Login successful',
@@ -163,15 +213,22 @@ export default function createAuthRouter(connectToMongo) {
             firstName: 'Database',
             lastName: 'Administrator',
             email: sanitizedEmailInput,
-            role: 'dba'
+            role: 'dba',
+            managedVansh: managedVansh
           }
         });
       }
       if (sanitizedEmailInput === process.env.ADMIN_EMAIL && inputPassword === process.env.ADMIN_PASSWORD) {
+        const db = await connectToMongo();
+        const adminsCollection = db.collection('admins');
+        const adminRecord = await adminsCollection.findOne({ email: sanitizedEmailInput });
+        const managedVansh = adminRecord?.managedVansh || null;
+        
         const token = jwt.sign({
           sub: 'admin_user',
           email: sanitizedEmailInput,
-          role: 'admin'
+          role: 'admin',
+          managedVansh: managedVansh
         }, process.env.JWT_SECRET || 'dev_secret', { expiresIn: '7d' });
         return res.json({
           message: 'Admin Login successful',
@@ -181,45 +238,80 @@ export default function createAuthRouter(connectToMongo) {
             firstName: 'System',
             lastName: 'Administrator',
             email: sanitizedEmailInput,
-            role: 'admin'
+            role: 'admin',
+            managedVansh: managedVansh
           }
         });
       }
       const db = await connectToMongo();
-      const users = await getUsersCollection(db);
-      const normalizedEmail = sanitizedEmailInput.toLowerCase();
-      const emailRegex = new RegExp(`^${escapeRegex(normalizedEmail)}$`, 'i');
-      let user = await users.findOne({
-        $or: emailFields.map(field => ({ [field]: emailRegex }))
-      });
-      if (!user) {
-        const pipeline = [
-          {
-            $addFields: {
-              __emails: emailFields.map(field => ({ field, value: { $ifNull: [`$${field}`, ''] } }))
-            }
-          },
-          {
-            $match: {
-              __emails: {
-                $elemMatch: {
-                  value: { $type: 'string' },
-                  $expr: {
-                    $eq: [
-                      { $toLower: '$$this.value' },
-                      normalizedEmail
-                    ]
+      const usersCollection = await getUsersCollection(db);
+      const loginCollection = db.collection('login');
+      const normalizedInput = sanitizedEmailInput.toLowerCase();
+      
+      // Check if input is username (no @ symbol) or email
+      const isUsername = !sanitizedEmailInput.includes('@');
+      
+      let user = null;
+      
+      if (isUsername) {
+        // Direct username lookup - try both collections (case-insensitive)
+        user = await usersCollection.findOne({
+          $or: [
+            { username: { $regex: new RegExp(`^${escapeRegex(normalizedInput)}$`, 'i') } },
+            { Username: { $regex: new RegExp(`^${escapeRegex(normalizedInput)}$`, 'i') } }
+          ]
+        });
+        
+        // If not found in users collection, try login collection
+        if (!user) {
+          user = await loginCollection.findOne({
+            $or: [
+              { username: { $regex: new RegExp(`^${escapeRegex(normalizedInput)}$`, 'i') } },
+              { Username: { $regex: new RegExp(`^${escapeRegex(normalizedInput)}$`, 'i') } }
+            ]
+          });
+        }
+      } else {
+        // Email lookup with existing logic
+        const emailRegex = new RegExp(`^${escapeRegex(normalizedInput)}$`, 'i');
+        user = await usersCollection.findOne({
+          $or: emailFields.map(field => ({ [field]: emailRegex }))
+        });
+        if (!user) {
+          const pipeline = [
+            {
+              $addFields: {
+                __emails: emailFields.map(field => ({ field, value: { $ifNull: [`$${field}`, ''] } }))
+              }
+            },
+            {
+              $match: {
+                __emails: {
+                  $elemMatch: {
+                    value: { $type: 'string' },
+                    $expr: {
+                      $eq: [
+                        { $toLower: '$$this.value' },
+                        normalizedInput
+                      ]
+                    }
                   }
                 }
               }
-            }
-          },
-          { $limit: 1 }
-        ];
-        user = await users.aggregate(pipeline).next();
+            },
+            { $limit: 1 }
+          ];
+          user = await usersCollection.aggregate(pipeline).next();
+        }
+        
+        // If not found in users collection, try login collection
+        if (!user) {
+          user = await loginCollection.findOne({
+            $or: emailFields.map(field => ({ [field]: emailRegex }))
+          });
+        }
       }
       if (!user) {
-        console.log('[auth] login: user not found for email', sanitizedEmailInput);
         return res.status(401).json({ message: 'Invalid credentials' });
       }
       const storedPasswordValue = findFieldValue(user, passwordFields);
@@ -241,11 +333,13 @@ export default function createAuthRouter(connectToMongo) {
       const resolvedEmailValue = findFieldValue(user, emailFields) || sanitizedEmailInput;
       const resolvedRole = user.role || user.Role || user.userRole || 'user';
       const serNo = user.serNo || user.SerNo || user.serno || null;
+      const username = user.username || user.Username || null;
       const token = jwt.sign({
         sub: String(user._id),
         email: String(resolvedEmailValue).toLowerCase(),
         role: resolvedRole,
-        serNo: serNo
+        serNo: serNo,
+        username: username
       }, process.env.JWT_SECRET || 'dev_secret', { expiresIn: '7d' });
       return res.json({
         message: 'Login successful',
@@ -256,7 +350,8 @@ export default function createAuthRouter(connectToMongo) {
           lastName: user.lastName || user.LastName || user.lastname || '',
           email: String(resolvedEmailValue).toLowerCase(),
           role: resolvedRole,
-          serNo: serNo
+          serNo: serNo,
+          username: username
         }
       });
     } catch (err) {
@@ -267,37 +362,95 @@ export default function createAuthRouter(connectToMongo) {
 
   router.get('/me', async (req, res) => {
     try {
-      const auth = req.headers.authorization || '';
-      const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-      if (!token) return res.status(401).json({ message: 'Missing token' });
-      const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret');
-      if (payload.sub === 'dba_admin') {
+      const token = req.headers.authorization?.split(' ')[1];
+      if (!token) return res.status(401).json({ message: 'No token provided' });
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret');
+      const db = await connectToMongo();
+      
+      let user = null;
+      let managedVansh = null;
+      
+      if (decoded.sub === 'admin_user') {
         return res.json({
-          id: 'dba_admin',
-          name: 'Database Administrator',
-          email: payload.email,
-          role: 'dba'
+          firstName: 'System',
+          lastName: 'Administrator',
+          username: 'admin',
+          email: decoded.email,
+          role: 'admin',
+          managedVansh: decoded.managedVansh || null
         });
       }
-      const db = await connectToMongo();
-      const users = await getUsersCollection(db);
-      const user = await users.findOne({ _id: new (await import('mongodb')).ObjectId(payload.sub) });
+
+      if (decoded.sub === 'master_admin' || decoded.role === 'master_admin') {
+        return res.json({
+          firstName: 'Master',
+          lastName: 'Administrator',
+          username: masterAdminUsername,
+          email: masterAdminEmail.toLowerCase(),
+          role: 'master_admin',
+          managedVansh: null,
+          serNo: masterAdminSerNo,
+          isMasterAdmin: true
+        });
+      }
+
+      if (decoded.sub === 'dba_admin') {
+        return res.json({
+          firstName: 'Database',
+          lastName: 'Administrator',
+          username: 'dba',
+          email: decoded.email,
+          role: 'dba',
+          managedVansh: decoded.managedVansh || null
+        });
+      }
+      
+      // Get login user first to extract username - try both collections
+      const usersCollection = await getUsersCollection(db);
+      const loginCollection = db.collection('login');
+      
+      user = await usersCollection.findOne({ _id: new ObjectId(decoded.sub) });
+      if (!user) {
+        user = await loginCollection.findOne({ _id: new ObjectId(decoded.sub) });
+      }
+      
       if (!user) return res.status(404).json({ message: 'User not found' });
-      const resolvedEmailValue = findFieldValue(user, emailFields) || user.email || user.Email || '';
-      const resolvedRole = user.role || user.Role || user.userRole || 'user';
-      const serNo = user.serNo || user.SerNo || user.serno || null;
+      
+      // Extract username from login user
+      const username = user.username || user.Username || '';
+      
+      // Now lookup the members collection directly by username (root level)
+      const membersCollection = db.collection('members');
+      const member = await membersCollection.findOne({ username: username });
+      
+      let firstName = '';
+      let memberVanshNo = null;
+      let email = '';
+      managedVansh = user.managedVansh || user.ManagedVansh || null;
+      
+      if (member) {
+        // Extract from personalDetails (nested structure)
+        firstName = member.personalDetails?.firstName || member.personalDetails?.FirstName || '';
+        memberVanshNo = member.personalDetails?.vansh || member.personalDetails?.Vansh || null;
+        email = member.personalDetails?.email || member.personalDetails?.Email || '';
+      } else {
+        // Fallback to login user data
+        firstName = user.firstName || user.FirstName || user.firstname || '';
+        email = user.email || user.Email || '';
+      }
+      
+      console.log('[auth/me] Returning managedVansh:', managedVansh, 'for user:', username);
       return res.json({
-        id: String(user._id),
-        name: user.name || [user.firstName || user.FirstName || '', user.lastName || user.LastName || ''].filter(Boolean).join(' ').trim(),
-        email: String(resolvedEmailValue).toLowerCase(),
-        role: resolvedRole,
-        serNo: serNo
+        firstName: firstName,
+        VanshNo: memberVanshNo,
+        username: username,
+        email: email,
+        role: user.role || user.Role || 'user',
+        managedVansh: managedVansh
       });
     } catch (err) {
-      console.error('[auth] me error', err);
-      return res.status(401).json({ message: 'Invalid token' });
+      console.error('[auth/me] error', err);
+      return res.status(500).json({ message: 'Server error' });
     }
-  });
-
-  return router;
+  });  return router;
 }

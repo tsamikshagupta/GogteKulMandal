@@ -80,6 +80,8 @@ const membersSchema = new mongoose.Schema(
   {
     sNo: Number,
     isapproved: Boolean,
+    username: String,
+    password: String,
     personalDetails: personalDetailsSchema,
     parentsInformation: parentsInformationSchema,
     marriedDetails: marriedDetailsSchema,

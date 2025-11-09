@@ -28,7 +28,7 @@ export const requireDBA = (req, res, next) => {
 
 // Middleware to check if user has admin role
 export const requireAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
+  if (req.user.role !== 'admin' && req.user.role !== 'master_admin') {
     return res.status(403).json({ message: 'Access denied. Admin role required.' });
   }
   next();
@@ -36,8 +36,51 @@ export const requireAdmin = (req, res, next) => {
 
 // Middleware to check if user has admin or DBA role
 export const requireAdminOrDBA = (req, res, next) => {
-  if (req.user.role !== 'dba' && req.user.role !== 'admin') {
+  if (req.user.role !== 'dba' && req.user.role !== 'admin' && req.user.role !== 'master_admin') {
     return res.status(403).json({ message: 'Access denied. Admin or DBA role required.' });
   }
   next();
+};
+
+// Middleware to verify admin has access to a specific vansh
+export const requireVanshAccess = (req, res, next) => {
+  if (req.user.role === 'dba' || req.user.role === 'master_admin') {
+    return next();
+  }
+  
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Access denied. Admin role required.' });
+  }
+  
+  if (!req.user.managedVansh) {
+    return res.status(403).json({ message: 'Access denied. No vansh assigned to admin.' });
+  }
+  
+  next();
+};
+
+// Middleware to verify data belongs to admin's vansh
+export const verifyVanshOwnership = (getVanshFromData) => {
+  return (req, res, next) => {
+    if (req.user.role === 'dba' || req.user.role === 'master_admin') {
+      return next();
+    }
+    
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin role required.' });
+    }
+    
+    if (!req.user.managedVansh) {
+      return res.status(403).json({ message: 'Access denied. No vansh assigned to admin.' });
+    }
+    
+    const dataVansh = getVanshFromData(req);
+    const adminVansh = req.user.managedVansh;
+    
+    if (String(dataVansh) !== String(adminVansh)) {
+      return res.status(403).json({ message: 'Access denied. This data belongs to a different vansh.' });
+    }
+    
+    next();
+  };
 };

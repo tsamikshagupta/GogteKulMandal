@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
 import { X, User, Calendar, MapPin, Briefcase, GraduationCap, Phone, Mail, Users, Heart } from 'lucide-react';
+import api from '../utils/api';
 
 export function MemberDetailsModal({ isOpen, onClose, member }) {
   const [familyMembers, setFamilyMembers] = useState({});

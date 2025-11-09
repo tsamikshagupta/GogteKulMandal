@@ -4,7 +4,64 @@ import { useForm, Controller } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
 import MultiStepForm from "../components/MultiStepForm.jsx";
 import ParentAutocomplete from "../components/ParentAutocomplete.jsx";
+import LoadingSpinner from "../components/LoadingSpinner";
 import { motion } from "framer-motion";
+
+// Image compression utility
+const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.8) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions while maintaining aspect ratio
+        if (width > height) {
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = (width * maxHeight) / height;
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to blob with compression
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              // Create a new File object with the compressed blob
+              const compressedFile = new File([blob], file.name, {
+                type: 'image/jpeg',
+                lastModified: Date.now(),
+              });
+              resolve(compressedFile);
+            } else {
+              reject(new Error('Canvas to Blob conversion failed'));
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = reject;
+    };
+    reader.onerror = reject;
+  });
+};
 
 const VanshInputField = ({ field, error }) => {
   const inputRef = useRef(null);
@@ -215,13 +272,25 @@ const FilePreviewInput = ({
   });
 
   const handleChange = useCallback(
-    (event) => {
+    async (event) => {
       const file = event.target.files?.[0];
       if (file) {
-        const reader = new FileReader();
-        reader.onload = () => setPreview(reader.result);
-        reader.readAsDataURL(file);
-        field.onChange(file);
+        try {
+          // Compress the image before processing
+          const compressedFile = await compressImage(file);
+          
+          const reader = new FileReader();
+          reader.onload = () => setPreview(reader.result);
+          reader.readAsDataURL(compressedFile);
+          field.onChange(compressedFile);
+        } catch (error) {
+          console.error('Image compression failed:', error);
+          // Fallback to original file if compression fails
+          const reader = new FileReader();
+          reader.onload = () => setPreview(reader.result);
+          reader.readAsDataURL(file);
+          field.onChange(file);
+        }
       } else {
         setPreview(initialPreview || null);
         field.onChange(null);
@@ -251,6 +320,11 @@ const FilePreviewInput = ({
   }, [field.value, initialPreview]);
 
   const effectivePreview = preview;
+  const fileInputRef = useRef(null);
+
+  const handleChangePhotoClick = () => {
+    fileInputRef.current?.click();
+  };
 
   return (
     <div className="space-y-2">
@@ -260,6 +334,7 @@ const FilePreviewInput = ({
       </label>
       <div className="flex items-center gap-4">
         <input
+          ref={fileInputRef}
           type="file"
           accept={accept}
           onChange={handleChange}
@@ -267,14 +342,23 @@ const FilePreviewInput = ({
           className="block w-full cursor-pointer rounded-lg border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm transition hover:border-primary-400 hover:text-slate-800"
         />
         {effectivePreview ? (
-          <motion.img
-            src={effectivePreview}
-            alt={`${label} preview`}
-            className="h-16 w-16 rounded-full border border-slate-200 object-cover shadow-sm"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.3 }}
-          />
+          <div className="flex flex-col items-center gap-2">
+            <motion.img
+              src={effectivePreview}
+              alt={`${label} preview`}
+              className="h-16 w-16 rounded-full border border-slate-200 object-cover shadow-sm"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.3 }}
+            />
+            <button
+              type="button"
+              onClick={handleChangePhotoClick}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium underline"
+            >
+              Change Photo
+            </button>
+          </div>
         ) : null}
       </div>
       {description && (
@@ -287,7 +371,7 @@ const FilePreviewInput = ({
   );
 };
 
-const TextInput = ({ label, register, required, error, type = "text", ...props }) => (
+const TextInput = ({ label, register, required, error, type = "text", disabled = false, ...props }) => (
   <div className="space-y-2">
     <label className="block text-sm font-medium text-slate-700">
       {label}
@@ -295,7 +379,10 @@ const TextInput = ({ label, register, required, error, type = "text", ...props }
     </label>
     <input
       type={type}
-      className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm transition focus:border-primary-500 focus:ring-primary-500"
+      disabled={disabled}
+      className={`w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm transition focus:border-primary-500 focus:ring-primary-500 ${
+        disabled ? "bg-slate-100 text-slate-400 cursor-not-allowed" : ""
+      }`}
       {...register}
       {...props}
     />
@@ -407,6 +494,8 @@ export default function FamilyFormPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [fatherSelected, setFatherSelected] = useState(false);
+  const [motherSelected, setMotherSelected] = useState(false);
 
   // Scroll to top immediately whenever the step changes (and on mount)
   useEffect(() => {
@@ -434,6 +523,14 @@ export default function FamilyFormPage() {
   const formValues = watch();
   const [fatherPreview, setFatherPreview] = useState(null);
   const [motherPreview, setMotherPreview] = useState(null);
+
+  // Autofill vansh from logged-in user
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem('currentUser') || localStorage.getItem('user') || '{}');
+    if (user && user.personalDetails && user.personalDetails.vansh) {
+      setValue('personalDetails.vansh', user.personalDetails.vansh);
+    }
+  }, [setValue]);
 
   useEffect(() => {
     const fatherImage = formValues.parentsInformation?.fatherProfileImage;
@@ -487,8 +584,9 @@ export default function FamilyFormPage() {
 
     try {
       const formData = toFormData(data);
-      const response = await axios.post("/api/family/add", formData, {
+      const response = await axios.post("http://localhost:5000/api/family/add", formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 15000, // 15 second timeout (reduced from 30s)
       });
 
       if (response.data.success) {
@@ -496,10 +594,13 @@ export default function FamilyFormPage() {
         setShowSuccessModal(true);
         reset();
         setCurrentStep(1);
+        setFatherSelected(false);
+        setMotherSelected(false);
       }
     } catch (error) {
+      console.error('Registration error:', error);
       setSubmitMessage(
-        error.response?.data?.message || "An error occurred while submitting the form"
+        error.response?.data?.message || error.message || "An error occurred while submitting the form"
       );
     } finally {
       setIsSubmitting(false);
@@ -534,6 +635,21 @@ export default function FamilyFormPage() {
         render: () => (
           <StepSection title="Personal Details">
             <div className="grid gap-6 md:grid-cols-2">
+              <Controller
+                name="personalDetails.vansh"
+                control={control}
+                rules={{
+                  required: "Vansh is required",
+                  min: { value: 1, message: "Vansh must be at least 1" },
+                  max: { value: 110, message: "Vansh must not exceed 110" },
+                }}
+                render={({ field }) => (
+                  <VanshInputField 
+                    field={field} 
+                    error={errors.personalDetails?.vansh?.message} 
+                  />
+                )}
+              />
               <TextInput
                 label="First Name"
                 register={register("personalDetails.firstName", {
@@ -591,19 +707,23 @@ export default function FamilyFormPage() {
                 required
                 error={errors.personalDetails?.isAlive?.message}
               />
-              <TextInput
-                label="Date of Death"
-                type="date"
-                register={register("personalDetails.dateOfDeath")}
-              />
-              <RadioGroup
-                label="Confirm Date of Death?"
-                name="personalDetails.confirmDateOfDeath"
-                control={control}
-                options={radioOptions}
-                required
-                error={errors.personalDetails?.confirmDateOfDeath?.message}
-              />
+              {formValues.personalDetails?.isAlive === "no" && (
+                <>
+                  <TextInput
+                    label="Date of Death"
+                    type="date"
+                    register={register("personalDetails.dateOfDeath")}
+                  />
+                  <RadioGroup
+                    label="Confirm Date of Death?"
+                    name="personalDetails.confirmDateOfDeath"
+                    control={control}
+                    options={radioOptions}
+                    required
+                    error={errors.personalDetails?.confirmDateOfDeath?.message}
+                  />
+                </>
+              )}
               <TextInput
                 label="Email"
                 type="email"
@@ -721,21 +841,6 @@ export default function FamilyFormPage() {
                 options={radioOptions}
                 required
                 error={errors.personalDetails?.everMarried?.message}
-              />
-              <Controller
-                name="personalDetails.vansh"
-                control={control}
-                rules={{
-                  required: "Vansh is required",
-                  min: { value: 1, message: "Vansh must be at least 1" },
-                  max: { value: 110, message: "Vansh must not exceed 110" },
-                }}
-                render={({ field }) => (
-                  <VanshInputField 
-                    field={field} 
-                    error={errors.personalDetails?.vansh?.message} 
-                  />
-                )}
               />
             </div>
           </StepSection>
@@ -1243,6 +1348,7 @@ export default function FamilyFormPage() {
                         shouldValidate: true,
                       });
                     }
+                    setFatherSelected(true);
                   }}
                   error={errors.parentsInformation?.fatherFirstName?.message}
                   firstNameValue={formValues.parentsInformation?.fatherFirstName}
@@ -1258,10 +1364,12 @@ export default function FamilyFormPage() {
                 })}
                 required
                 error={errors.parentsInformation?.fatherFirstName?.message}
+                disabled={fatherSelected}
               />
               <TextInput
                 label="Father's Middle Name"
                 register={register("parentsInformation.fatherMiddleName")}
+                disabled={fatherSelected}
               />
               <TextInput
                 label="Father's Last Name"
@@ -1270,18 +1378,21 @@ export default function FamilyFormPage() {
                 })}
                 required
                 error={errors.parentsInformation?.fatherLastName?.message}
+                disabled={fatherSelected}
               />
               <TextInput
                 label="Father's Email"
                 type="email"
                 register={register("parentsInformation.fatherEmail")}
                 error={errors.parentsInformation?.fatherEmail?.message}
+                disabled={fatherSelected}
               />
               <TextInput
                 label="Father's Mobile Number"
                 type="tel"
                 register={register("parentsInformation.fatherMobileNumber")}
                 error={errors.parentsInformation?.fatherMobileNumber?.message}
+                disabled={fatherSelected}
               />
               <TextInput
                 label="Father's Date of Birth"
@@ -1291,6 +1402,7 @@ export default function FamilyFormPage() {
                 })}
                 required
                 error={errors.parentsInformation?.fatherDateOfBirth?.message}
+                disabled={fatherSelected}
               />
               <Controller
                 name="parentsInformation.fatherProfileImage"
@@ -1349,6 +1461,7 @@ export default function FamilyFormPage() {
                         shouldValidate: true,
                       });
                     }
+                    setMotherSelected(true);
                   }}
                   error={errors.parentsInformation?.motherFirstName?.message}
                   firstNameValue={formValues.parentsInformation?.motherFirstName}
@@ -1364,10 +1477,12 @@ export default function FamilyFormPage() {
                 })}
                 required
                 error={errors.parentsInformation?.motherFirstName?.message}
+                disabled={motherSelected}
               />
               <TextInput
                 label="Mother's Middle Name"
                 register={register("parentsInformation.motherMiddleName")}
+                disabled={motherSelected}
               />
               <TextInput
                 label="Mother's Last Name"
@@ -1376,12 +1491,14 @@ export default function FamilyFormPage() {
                 })}
                 required
                 error={errors.parentsInformation?.motherLastName?.message}
+                disabled={motherSelected}
               />
               <TextInput
                 label="Mother's Mobile Number"
                 type="tel"
                 register={register("parentsInformation.motherMobileNumber")}
                 error={errors.parentsInformation?.motherMobileNumber?.message}
+                disabled={motherSelected}
               />
               <TextInput
                 label="Mother's Date of Birth"
@@ -1390,6 +1507,7 @@ export default function FamilyFormPage() {
                   required: "Date of birth is required",
                 })}
                 required
+                disabled={motherSelected}
                 error={errors.parentsInformation?.motherDateOfBirth?.message}
               />
               <Controller
@@ -1473,8 +1591,20 @@ export default function FamilyFormPage() {
   const visibleSections = getVisibleSections();
 
   const handleNext = () => {
+    // Require Vansh before moving from Personal Details step
+    if (currentStep === 1) {
+      const vanshValue = formValues.personalDetails?.vansh;
+      if (!vanshValue || vanshValue === "" || vanshValue === 0) {
+        setSubmitMessage("Please enter your Vansh before proceeding to the next step");
+        // Scroll to top immediately
+        window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+        return;
+      }
+    }
+    
     if (currentStep < visibleSections.length) {
       setCurrentStep(currentStep + 1);
+      setSubmitMessage(""); // Clear any previous messages
     }
   };
 
@@ -1486,6 +1616,15 @@ export default function FamilyFormPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-12 sm:px-6 lg:px-8">
+      {/* Loading Overlay */}
+      {isSubmitting && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex flex-col items-center justify-center z-50">
+          <LoadingSpinner />
+          <p className="mt-4 text-white text-lg font-medium">Submitting your registration...</p>
+          <p className="mt-2 text-white text-sm">Please wait, this may take a moment</p>
+        </div>
+      )}
+
       <div className="mx-auto max-w-4xl">
         {/* Back to Home Button */}
         <motion.div

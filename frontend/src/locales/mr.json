@@ -196,5 +196,11 @@
     "emailAddress": "gogtekulam@gmail.com",
     "viewOnMap": "नकाशावर पहा",
     "backToDashboard": "← डॅशबोर्डवर परत"
+  },
+  "relations": {
+    "father": "पिता",
+    "mother": "माता",
+    "son": "पुत्र",
+    "daughter": "पुत्री"
   }
 }

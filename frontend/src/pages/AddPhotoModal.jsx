@@ -75,47 +75,25 @@ export function AddPhotoModal({ onAddPhoto }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (title && description && category && (imagePreviews.length > 0 || imageUrl)) {
+    if (title && description && category && uploadedImages.length > 0) {
       setIsSubmitting(true);
       
       try {
-        // If multiple images, create a photo collection
-        if (imagePreviews.length > 0) {
-          const photoData = {
-            title,
-            description,
-            category,
-            imageUrl: imagePreviews[0], // Main image
-            imageUrls: imagePreviews, // All images
-            uploadedImages: uploadedImages,
-            photographer: "Family Member",
-            location,
-            eventDate,
-            tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-            generation: '2020s',
-            occasion: 'General'
-          };
-          
-          onAddPhoto(photoData);
-        } else if (imageUrl) {
-          const photoData = {
-            title,
-            description,
-            category,
-            imageUrl,
-            photographer: "Family Member",
-            location,
-            eventDate,
-            tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
-            generation: '2020s',
-            occasion: 'General'
-          };
-          
-          onAddPhoto(photoData);
-        }
+        // Prepare data with actual file objects
+        const photoData = {
+          title,
+          description,
+          category,
+          photographer: "Family Member",
+          location,
+          eventDate,
+          tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
+          generation: '2020s',
+          occasion: 'General',
+          files: uploadedImages // Pass the actual File objects
+        };
         
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await onAddPhoto(photoData);
         
         // Reset form
         setTitle('');
@@ -133,9 +111,12 @@ export function AddPhotoModal({ onAddPhoto }) {
         setOpen(false);
       } catch (error) {
         console.error('Error submitting photos:', error);
+        alert('Failed to upload photos. Please try again.');
       } finally {
         setIsSubmitting(false);
       }
+    } else {
+      alert('Please fill in all required fields and upload at least one image.');
     }
   };
 
@@ -156,7 +137,7 @@ export function AddPhotoModal({ onAddPhoto }) {
               <div className="w-12 h-12 bg-amber-500 rounded-full flex items-center justify-center mr-4">
                 <Camera className="w-6 h-6 text-white" />
               </div>
-              Share Your Family Memories
+              Add Your Family Photos
             </DialogTitle>
             <p className="text-amber-700 text-sm">Upload multiple photos and share detailed information about your family's precious moments</p>
           </DialogHeader>
@@ -354,15 +335,15 @@ export function AddPhotoModal({ onAddPhoto }) {
               disabled={isSubmitting}
               className="bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 disabled:cursor-not-allowed px-8"
             >
-              {isSubmitting ? (
-                <>
+                  {isSubmitting ? (
+                <> 
                   <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
-                  Sharing Photos...
+                  Uploading...
                 </>
               ) : (
                 <>
-                  <Send className="w-5 h-5 mr-2" />
-                  Share Photos
+                  <Upload className="w-5 h-5 mr-2" />
+                  Upload Photos
                 </>
               )}
             </Button>

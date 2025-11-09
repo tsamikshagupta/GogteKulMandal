@@ -26,14 +26,15 @@ const ProtectedRoute = () => {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
   
-  // Redirect DBA users to DBA dashboard
   const userRole = getUserRole();
+  const isAdminRole = userRole === 'admin' || userRole === 'master_admin';
+  const allowAdminPaths = ['/kulavruksh'];
+  const isAllowedAdminPath = allowAdminPaths.some(path => location.pathname === path || location.pathname.startsWith(`${path}/`));
   if (userRole === 'dba') {
     return <Navigate to="/dba-dashboard" replace />;
   }
   
-  // Redirect Admin users to Admin dashboard
-  if (userRole === 'admin') {
+  if (isAdminRole && !isAllowedAdminPath) {
     return <Navigate to="/admin-dashboard" replace />;
   }
   
@@ -68,12 +69,13 @@ export const AdminProtectedRoute = () => {
   }
   
   const userRole = getUserRole();
-  if (userRole !== 'admin') {
+  const isAdminRole = userRole === 'admin' || userRole === 'master_admin';
+  if (!isAdminRole) {
     return <Navigate to="/dashboard" replace />;
   }
   
   // If Admin user tries to access regular dashboard, redirect to Admin dashboard
-  if (location.pathname === '/dashboard' && userRole === 'admin') {
+  if (location.pathname === '/dashboard' && isAdminRole) {
     return <Navigate to="/admin-dashboard" replace />;
   }
   
@@ -81,4 +83,3 @@ export const AdminProtectedRoute = () => {
 };
 
 export default ProtectedRoute;
-

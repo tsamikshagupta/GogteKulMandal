@@ -8,6 +8,10 @@ import './i18n';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 
 function AutoLogoutWrapper({ children }) {
+  // DISABLED: Auto-logout on page visibility change was causing logout on refresh
+  // If you need to re-enable auto-logout, uncomment the useEffect below
+  
+  /*
   useEffect(() => {
     const doLogout = () => {
       try {
@@ -94,6 +98,7 @@ function AutoLogoutWrapper({ children }) {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+  */
 
   return children;
 }

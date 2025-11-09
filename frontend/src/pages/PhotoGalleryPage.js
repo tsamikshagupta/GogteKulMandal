@@ -1,66 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Filter, Search, Calendar, Users, Star, RefreshCw, User, Clock, Heart, MessageCircle, X, Send, Camera, MapPin, Tag, Plus, ArrowLeft } from 'lucide-react';
+import axios from 'axios';
+import { Filter, Search, Calendar, Users, Star, RefreshCw, User, Clock, X, Send, Camera, MapPin, Tag, Plus, ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { AddPhotoModal } from './AddPhotoModal';
 import { PhotoCard } from './PhotoCard';
 import Footer from '../components/Footer';
 
+const API_URL = 'http://localhost:4000/api/media';
+
 export default function PhotoGalleryPage() {
   const { t } = useTranslation();
   
-  const [photos, setPhotos] = useState([
-    {
-      id: 1,
-      title: "Gogte Family's Ancestral Home",
-      description: "This is our family's ancestral home where our forefathers lived. The house holds many precious memories and stories from generations past.",
-      photographer: "Raju Gogte",
-      category: "heritage",
-      location: "Gogave, Satara",
-      eventDate: "1950-01-01",
-      tags: ["family", "history", "home", "heritage"],
-      timestamp: "2 days ago",
-      likes: 24,
-      comments: 8,
-      imageUrl: "https://images.unsplash.com/photo-1685702232056-657ddb88676a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0cmFkaXRpb25hbCUyMGluZGlhbiUyMGZhbWlseSUyMHBob3RvcyUyMHZpbnRhZ2UlMjBzZXBpYXxlbnwxfHx8fDE3NTcyNjc2MDh8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-      generation: "1950s",
-      occasion: "House Photo"
-    },
-    {
-      id: 2,
-      title: "Grandparents' Wedding",
-      description: "This is a precious photo of our grandparents' wedding ceremony. The traditional attire and decorations reflect the cultural heritage of our family.",
-      photographer: "Sunita Gogte",
-      category: "celebration",
-      location: "Pune, Maharashtra",
-      eventDate: "1960-05-15",
-      tags: ["wedding", "traditional", "grandparents", "celebration"],
-      timestamp: "1 week ago",
-      likes: 45,
-      comments: 15,
-      imageUrl: "https://images.unsplash.com/photo-1719468452346-20bbb785de2e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxpbmRpYW4lMjB3ZWRkaW5nJTIwY2VsZWJyYXRpb24lMjB0cmFkaXRpb25hbHxlbnwxfHx8fDE3NTcyNjc2MTJ8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-      generation: "1960s",
-      occasion: "Wedding"
-    },
-    {
-      id: 3,
-      title: "Ganesh Festival Celebration",
-      description: "Our complete family photo from this year's Ganesh festival celebration. Everyone came together to celebrate this auspicious occasion with great joy and devotion.",
-      photographer: "Anil Gogte",
-      category: "celebration",
-      location: "Mumbai, Maharashtra",
-      eventDate: "2024-09-15",
-      tags: ["ganeshfestival", "festival", "family", "celebration"],
-      timestamp: "2 weeks ago",
-      likes: 38,
-      comments: 12,
-      imageUrl: "https://images.unsplash.com/photo-1720238280932-80c60018e055?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmYW1pbHklMjBjZWxlYnJhdGlvbiUyMGZlc3RpdmFsJTIwdHJhZGl0aW9uYWx8ZW58MXx8fHwxNzU3MjY3NjE2fDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-      generation: "2020s",
-      occasion: "Ganesh Festival"
-    }
-  ]);
-
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [photos, setPhotos] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState(null);
@@ -68,58 +20,67 @@ export default function PhotoGalleryPage() {
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [isGalleryMode, setIsGalleryMode] = useState(false);
   const [currentGalleryPhotos, setCurrentGalleryPhotos] = useState([]);
-  const [storageError, setStorageError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Load photos from localStorage on component mount
+  // Load photos from API on component mount
   useEffect(() => {
-    try {
-      const savedPhotos = localStorage.getItem('gogtePhotos');
-      if (savedPhotos) {
-        setPhotos(JSON.parse(savedPhotos));
-      }
-    } catch (error) {
-      console.error('Error loading photos from localStorage:', error);
-      // Keep default photos if localStorage fails
-    }
+    fetchPhotos();
   }, []);
 
-  // Save photos to localStorage whenever photos state changes
-  useEffect(() => {
+  const fetchPhotos = async () => {
     try {
-      // Only save if photos have changed from initial state
-      if (photos.length > 0) {
-        localStorage.setItem('gogtePhotos', JSON.stringify(photos));
-      }
+      setIsLoading(true);
+      const response = await axios.get(API_URL);
+      // Transform API data to match UI structure
+      const transformedPhotos = response.data.map(photo => ({
+        id: photo._id,
+        title: photo.title,
+        description: photo.description,
+        photographer: photo.photographer,
+        category: photo.category,
+        location: photo.location,
+        eventDate: photo.eventDate,
+        tags: photo.tags || [],
+        timestamp: formatTimestamp(photo.uploaded_date),
+        likes: photo.likes || 0,
+        comments: photo.comments?.length || 0,
+        commentsList: photo.comments || [],
+        imageUrl: photo.image?.data || photo.image?.url,
+        imageUrls: photo.imageUrls?.map(img => img.data || img.url) || [],
+        generation: photo.generation,
+        occasion: photo.occasion,
+        isCollection: photo.isCollection || false,
+        photoCount: photo.photoCount || 1
+      }));
+      setPhotos(transformedPhotos);
     } catch (error) {
-      if (error.name === 'QuotaExceededError') {
-        console.warn('localStorage quota exceeded. Photos will not be persisted.');
-        setStorageError(true);
-      } else {
-        console.error('Error saving photos to localStorage:', error);
-      }
+      console.error('Error fetching photos:', error);
+    } finally {
+      setIsLoading(false);
     }
-  }, [photos]);
+  };
 
-  const categories = [
-    { value: 'all', label: 'All Categories' },
-    { value: 'heritage', label: 'Heritage' },
-    { value: 'celebration', label: 'Celebration' },
-    { value: 'wedding', label: 'Wedding' },
-    { value: 'festival', label: 'Festival' },
-    { value: 'family', label: 'Family Gathering' },
-    { value: 'achievement', label: 'Achievement' },
-    { value: 'memory', label: 'Memory' },
-    { value: 'general', label: 'General' }
-  ];
+  const formatTimestamp = (date) => {
+    if (!date) return 'Just now';
+    const now = new Date();
+    const uploadDate = new Date(date);
+    const diffTime = Math.abs(now - uploadDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+    return `${Math.floor(diffDays / 30)} months ago`;
+  };
 
   const filteredPhotos = photos.filter(photo => {
-    const matchesCategory = selectedCategory === 'all' || photo.category === selectedCategory;
-    const matchesSearch = photo.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         photo.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         photo.photographer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         photo.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         photo.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchesCategory && matchesSearch;
+    const matchesSearch = photo.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         photo.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         photo.photographer?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         photo.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         photo.tags?.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+    return matchesSearch;
   });
 
   // Keyboard navigation for gallery
@@ -140,127 +101,48 @@ export default function PhotoGalleryPage() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [showDetailModal, isGalleryMode, currentPhotoIndex, filteredPhotos]);
 
-  const handleAddPhoto = (newPhoto) => {
-    // If this is a multiple photo upload (has multiple imageUrls)
-    if (newPhoto.imageUrls && newPhoto.imageUrls.length > 1) {
-      // Create a photo collection
-      const photoCollection = {
-        id: Date.now(),
-        title: newPhoto.title,
-        description: newPhoto.description,
-        category: newPhoto.category,
-        imageUrl: newPhoto.imageUrls[0], // Use first image as main image
-        imageUrls: newPhoto.imageUrls, // Store all images
-        photographer: newPhoto.photographer || "Family Member",
-        location: newPhoto.location,
-        eventDate: newPhoto.eventDate,
-        tags: newPhoto.tags || [],
-        timestamp: "Just now",
-        likes: 0,
-        comments: 0,
-        generation: newPhoto.generation || '2020s',
-        occasion: newPhoto.occasion || 'General',
-        isCollection: true,
-        photoCount: newPhoto.imageUrls.length
-      };
-      setPhotos([photoCollection, ...photos]);
-    } else {
-      // Single photo upload
-      const photoItem = {
-        id: Date.now(),
-        title: newPhoto.title,
-        description: newPhoto.description,
-        category: newPhoto.category,
-        imageUrl: newPhoto.imageUrl,
-        photographer: newPhoto.photographer || "Family Member",
-        location: newPhoto.location,
-        eventDate: newPhoto.eventDate,
-        tags: newPhoto.tags || [],
-        timestamp: "Just now",
-        likes: 0,
-        comments: 0,
-        generation: newPhoto.generation || '2020s',
-        occasion: newPhoto.occasion || 'General',
-        isCollection: false,
-        photoCount: 1
-      };
-      setPhotos([photoItem, ...photos]);
-    }
-  };
-
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    // Simulate refresh delay
-    setTimeout(() => {
-      setIsRefreshing(false);
-      // In a real app, you would fetch fresh data from the server here
-    }, 1000);
-  };
-
-  const clearStorage = () => {
+  const handleAddPhoto = async (newPhoto) => {
     try {
-      localStorage.removeItem('gogtePhotos');
-      setPhotos([
-        {
-          id: 1,
-          title: "Gogte Family's Ancestral Home",
-          description: "This is our family's ancestral home where our forefathers lived. The house holds many precious memories and stories from generations past.",
-          photographer: "Raju Gogte",
-          category: "heritage",
-          location: "Gogave, Satara",
-          eventDate: "1950-01-01",
-          tags: ["family", "history", "home", "heritage"],
-          timestamp: "2 days ago",
-          likes: 24,
-          comments: 8,
-          imageUrl: "https://images.unsplash.com/photo-1685702232056-657ddb88676a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0cmFkaXRpb25hbCUyMGluZGlhbiUyMGZhbWlseSUyMHBob3RvcyUyMHZpbnRhZ2UlMjBzZXBpYXxlbnwxfHx8fDE3NTcyNjc2MDh8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-          generation: "1950s",
-          occasion: "House Photo",
-          isCollection: false,
-          photoCount: 1
-        },
-        {
-          id: 2,
-          title: "Grandparents' Wedding",
-          description: "This is a precious photo of our grandparents' wedding ceremony. The traditional attire and decorations reflect the cultural heritage of our family.",
-          photographer: "Sunita Gogte",
-          category: "celebration",
-          location: "Pune, Maharashtra",
-          eventDate: "1960-05-15",
-          tags: ["wedding", "traditional", "grandparents", "celebration"],
-          timestamp: "1 week ago",
-          likes: 45,
-          comments: 15,
-          imageUrl: "https://images.unsplash.com/photo-1719468452346-20bbb785de2e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxpbmRpYW4lMjB3ZWRkaW5nJTIwY2VsZWJyYXRpb24lMjB0cmFkaXRpb25hbHxlbnwxfHx8fDE3NTcyNjc2MTJ8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-          generation: "1960s",
-          occasion: "Wedding",
-          isCollection: false,
-          photoCount: 1
-        },
-        {
-          id: 3,
-          title: "Ganesh Festival Celebration",
-          description: "Our complete family photo from this year's Ganesh festival celebration. Everyone came together to celebrate this auspicious occasion with great joy and devotion.",
-          photographer: "Anil Gogte",
-          category: "celebration",
-          location: "Pune, Maharashtra",
-          eventDate: "2024-09-15",
-          tags: ["festival", "family", "ganesh", "celebration"],
-          timestamp: "3 days ago",
-          likes: 32,
-          comments: 12,
-          imageUrl: "https://images.unsplash.com/photo-1695048133142-1a20484d2569?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxpbmRpYW4lMjBmZXN0aXZhbCUyMGNlbGVicmF0aW9uJTIwZmFtaWx5JTIwcGhvdG9zZXxlbnwxfHx8fDE3NTcyNjc2MTV8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-          generation: "2020s",
-          occasion: "Festival",
-          isCollection: false,
-          photoCount: 1
+      const formData = new FormData();
+      formData.append('title', newPhoto.title);
+      formData.append('description', newPhoto.description);
+      formData.append('category', newPhoto.category);
+      formData.append('photographer', newPhoto.photographer || 'Family Member');
+      formData.append('location', newPhoto.location);
+      formData.append('eventDate', newPhoto.eventDate);
+      formData.append('generation', newPhoto.generation || '2020s');
+      formData.append('occasion', newPhoto.occasion || 'General');
+      
+      // Add tags
+      if (newPhoto.tags && newPhoto.tags.length > 0) {
+        newPhoto.tags.forEach(tag => formData.append('tags', tag));
+      }
+
+      // Handle multiple image uploads
+      if (newPhoto.files && newPhoto.files.length > 0) {
+        newPhoto.files.forEach(file => {
+          formData.append('files', file);
+        });
+      }
+
+      const response = await axios.post(API_URL, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
         }
-      ]);
-      setStorageError(false);
-      alert('Storage cleared successfully! You can now add new photos.');
+      });
+
+      // Refresh photos list after upload - WAIT for it to complete
+      await fetchPhotos();
     } catch (error) {
-      console.error('Error clearing storage:', error);
+      console.error('Error uploading photo:', error);
+      alert('Failed to upload photo. Please try again.');
     }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchPhotos();
+    setIsRefreshing(false);
   };
 
   const handlePhotoClick = (photoItem) => {
@@ -311,58 +193,7 @@ export default function PhotoGalleryPage() {
     setCurrentPhotoIndex(0);
   };
 
-  const handleLike = (photoId) => {
-    setPhotos(prevPhotos => 
-      prevPhotos.map(item => 
-        item.id === photoId 
-          ? { 
-              ...item, 
-              likes: item.likes + 1,
-              likedBy: [...(item.likedBy || []), 'currentUser'] // Track who liked
-            }
-          : item
-      )
-    );
-    
-    // Also update selectedPhoto if it's the same item
-    if (selectedPhoto && selectedPhoto.id === photoId) {
-      setSelectedPhoto(prev => ({ 
-        ...prev, 
-        likes: prev.likes + 1,
-        likedBy: [...(prev.likedBy || []), 'currentUser']
-      }));
-    }
-  };
-
-  const handleAddComment = (photoId, comment) => {
-    const newComment = {
-      id: Date.now(),
-      text: comment,
-      author: "You",
-      timestamp: "Just now"
-    };
-
-    setPhotos(prevPhotos => 
-      prevPhotos.map(item => 
-        item.id === photoId 
-          ? { 
-              ...item, 
-              comments: item.comments + 1,
-              commentsList: [...(item.commentsList || []), newComment]
-            }
-          : item
-      )
-    );
-    
-    // Also update selectedPhoto if it's the same item
-    if (selectedPhoto && selectedPhoto.id === photoId) {
-      setSelectedPhoto(prev => ({ 
-        ...prev, 
-        comments: prev.comments + 1,
-        commentsList: [...(prev.commentsList || []), newComment]
-      }));
-    }
-  };
+  // Likes and comments are not displayed in the gallery UI per design.
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100">
@@ -385,49 +216,16 @@ export default function PhotoGalleryPage() {
               <button
                 onClick={handleRefresh}
                 disabled={isRefreshing}
-                className="inline-flex items-center px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
                 {isRefreshing ? 'Refreshing...' : 'Refresh'}
               </button>
-              {storageError && (
-                <button
-                  onClick={clearStorage}
-                  className="inline-flex items-center px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-                >
-                  <X className="w-4 h-4 mr-2" />
-                  Clear Storage
-                </button>
-              )}
               <AddPhotoModal onAddPhoto={handleAddPhoto} />
             </div>
           </div>
         </div>
       </div>
-
-      {/* Storage Warning Banner */}
-      {storageError && (
-        <div className="bg-red-50 border-l-4 border-red-400 p-4 mx-4 mb-6">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <p className="text-sm text-red-700">
-                <strong>Storage limit reached!</strong> Photos cannot be saved permanently. 
-                <button 
-                  onClick={clearStorage}
-                  className="ml-2 underline hover:no-underline font-medium"
-                >
-                  Clear storage
-                </button> to add new photos.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Filters and Search */}
       <div className="max-w-6xl mx-auto px-4 py-6">
@@ -446,29 +244,11 @@ export default function PhotoGalleryPage() {
                 />
               </div>
             </div>
-
-            {/* Category Filter */}
-            <div className="lg:w-64">
-              <div className="relative">
-                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 text-amber-500 w-5 h-5" />
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 border border-orange-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent appearance-none bg-white"
-                >
-                  {categories.map(category => (
-                    <option key={category.value} value={category.value}>
-                      {category.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
           </div>
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-200">
             <div className="flex items-center">
               <Camera className="w-8 h-8 text-amber-500 mr-3" />
@@ -480,35 +260,17 @@ export default function PhotoGalleryPage() {
           </div>
           <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-200">
             <div className="flex items-center">
-              <Users className="w-8 h-8 text-amber-500 mr-3" />
+              <Calendar className="w-8 h-8 text-amber-500 mr-3" />
               <div>
-                <p className="text-sm text-amber-700">Active Members</p>
-                <p className="text-2xl font-bold text-amber-800">{new Set(photos.map(p => p.photographer)).size}</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-200">
-            <div className="flex items-center">
-              <Star className="w-8 h-8 text-amber-500 mr-3" />
-              <div>
-                <p className="text-sm text-amber-700">Total Likes</p>
-                <p className="text-2xl font-bold text-amber-800">{photos.reduce((sum, p) => sum + p.likes, 0)}</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-200">
-            <div className="flex items-center">
-              <Filter className="w-8 h-8 text-amber-500 mr-3" />
-              <div>
-                <p className="text-sm text-amber-700">Categories</p>
-                <p className="text-2xl font-bold text-amber-800">{categories.length - 1}</p>
+                <p className="text-sm text-amber-700">Events Recorded</p>
+                <p className="text-2xl font-bold text-amber-800">{photos.length}</p>
               </div>
             </div>
           </div>
         </div>
 
         {/* Photo Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-8">
           {filteredPhotos.length > 0 ? (
             filteredPhotos.map(photoItem => (
               <div 
@@ -517,7 +279,7 @@ export default function PhotoGalleryPage() {
                 className="bg-white rounded-xl shadow-sm border border-orange-200 overflow-hidden cursor-pointer hover:shadow-lg transition-shadow duration-300"
               >
                 {/* Image */}
-                <div className="aspect-video bg-gradient-to-br from-amber-100 to-orange-200 relative">
+                <div className="h-72 bg-gradient-to-br from-amber-100 to-orange-200 relative">
                   {photoItem.imageUrl ? (
                     <img 
                       src={photoItem.imageUrl} 
@@ -537,7 +299,7 @@ export default function PhotoGalleryPage() {
                   {/* Category Badge */}
                   <div className="absolute top-3 left-3">
                     <span className="bg-amber-500 text-white px-3 py-1 rounded-full text-sm font-medium">
-                      {categories.find(cat => cat.value === photoItem.category)?.label || photoItem.category}
+                      {photoItem.category || 'General'}
                     </span>
                   </div>
                   
@@ -573,16 +335,6 @@ export default function PhotoGalleryPage() {
                       <span className="flex items-center">
                         <Clock className="w-4 h-4 mr-1" />
                         {photoItem.timestamp}
-                      </span>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <span className="flex items-center">
-                        <Heart className="w-4 h-4 mr-1" />
-                        {photoItem.likes}
-                      </span>
-                      <span className="flex items-center">
-                        <MessageCircle className="w-4 h-4 mr-1" />
-                        {photoItem.comments}
                       </span>
                     </div>
                   </div>
@@ -669,7 +421,7 @@ export default function PhotoGalleryPage() {
                 {/* Category Badge */}
                 <div className="absolute top-4 left-4">
                   <span className="bg-amber-500 text-white px-4 py-2 rounded-full text-sm font-medium shadow-lg">
-                    {categories.find(cat => cat.value === selectedPhoto.category)?.label || selectedPhoto.category}
+                    {selectedPhoto.category || 'General'}
                   </span>
                 </div>
               </div>
@@ -719,30 +471,7 @@ export default function PhotoGalleryPage() {
                     <p className="text-amber-700 leading-relaxed text-sm">{selectedPhoto.description}</p>
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex items-center justify-between border-t border-orange-200 pt-4 mb-6">
-                    <div className="flex items-center space-x-4">
-                      <button
-                        onClick={() => handleLike(selectedPhoto.id)}
-                        className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-all duration-300 ${
-                          selectedPhoto.likedBy && selectedPhoto.likedBy.includes('currentUser')
-                            ? 'bg-red-100 hover:bg-red-200 text-red-700'
-                            : 'bg-amber-100 hover:bg-amber-200 text-amber-700'
-                        }`}
-                      >
-                        <Heart className={`w-4 h-4 ${selectedPhoto.likedBy && selectedPhoto.likedBy.includes('currentUser') ? 'fill-current' : ''}`} />
-                        <span className="text-sm">{selectedPhoto.likes}</span>
-                      </button>
-                      <span className="flex items-center space-x-2 text-amber-600 text-sm">
-                        <MessageCircle className="w-4 h-4" />
-                        <span>{selectedPhoto.comments}</span>
-                      </span>
-                    </div>
-                    
-                    <button className="flex items-center space-x-2 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-all duration-300 text-sm">
-                      <span>Share</span>
-                    </button>
-                  </div>
+                  {/* Actions: (removed Share button as per UI simplification) */}
 
                   {/* Thumbnail Gallery */}
                   {currentGalleryPhotos.length > 1 && (

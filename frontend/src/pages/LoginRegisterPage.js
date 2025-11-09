@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Footer from '../components/Footer';
+import LoadingSpinner from '../components/LoadingSpinner';
 import { apiLogin } from '../utils/api';
 import { useNavigate } from 'react-router-dom';
 
@@ -36,6 +37,8 @@ const LoginRegisterPage = () => {
       // Redirect based on user role
       if (user.role === 'dba') {
         window.location.href = '/dba-dashboard';
+      } else if (user.role === 'admin' || user.role === 'master_admin') {
+        window.location.href = '/admin-dashboard';
       } else {
         window.location.href = '/dashboard';
       }
@@ -52,6 +55,16 @@ const LoginRegisterPage = () => {
 
   return (
     <div className="flex flex-col min-h-screen">
+      {/* Loading Spinner Overlay */}
+      {loading && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 flex flex-col items-center gap-4 shadow-2xl">
+            <LoadingSpinner />
+            <p className="text-xl font-semibold text-gray-700">Logging in...</p>
+          </div>
+        </div>
+      )}
+      
       {/* Google Fonts Import */}
       <link href="https://fonts.googleapis.com/css2?family=Amita:wght@700&display=swap" rel="stylesheet" />
       {/* Hero Section */}
@@ -114,10 +127,10 @@ const LoginRegisterPage = () => {
                     <div className="w-full bg-green-50 text-green-700 px-3 py-2 rounded border border-green-200 text-sm">{success}</div>
                   )}
                   <input
-                    type="email"
+                    type="text"
                     name="login_email_custom"
-                    autoComplete="off"
-                    placeholder="Email"
+                    autoComplete="username"
+                    placeholder="Username"
                     className="w-full px-4 py-2 border border-amber-200 rounded focus:outline-none focus:ring-2 focus:ring-amber-400 text-lg"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}

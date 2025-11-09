@@ -3,17 +3,22 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { MongoClient } from 'mongodb';
 import mongoose from 'mongoose';
+import jwt from 'jsonwebtoken';
 import createAuthRouter from './routes/auth.js';
+import newsRouter from './routes/news.js';
+import eventsRouter from './routes/events.js';
+import mediaRouter from './routes/media.js';
 import fs from 'fs';
 import { verifyToken, requireDBA, requireAdmin } from './middleware/auth.js';
 import { upload, parseNestedFields } from './middleware/upload.js';
+import { transformMemberForTree, transformMembersForTree, buildTreeStructure, getMembersByLevel } from './utils/memberTransform.js';
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' })); // Increased limit for Base64 images
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Global error handler for JSON parsing errors
 app.use((error, req, res, next) => {
@@ -88,6 +93,61 @@ function nestObject(flatObj) {
   return nested;
 }
 
+const buildAdminVanshFilter = (rawVansh) => {
+  if (rawVansh === undefined || rawVansh === null) {
+    return {};
+  }
+  const normalized = `${rawVansh}`.trim();
+  if (!normalized) {
+    return {};
+  }
+  const numeric = Number(normalized);
+  const values = new Set([normalized]);
+  if (!Number.isNaN(numeric)) {
+    values.add(numeric);
+    values.add(numeric.toString());
+  }
+  const fields = [
+    'vansh',
+    'Vansh',
+    'VanshNo',
+    'vanshNo',
+    'personalDetails.vansh',
+    'personalDetails.Vansh',
+    'personalDetails.vanshNo',
+    'personalDetails.VanshNo'
+  ];
+  const conditions = [];
+  fields.forEach((field) => {
+    values.forEach((value) => {
+      conditions.push({ [field]: value });
+    });
+  });
+  return conditions.length ? { $or: conditions } : {};
+};
+
+const getAdminVanshFilterFromRequest = (req) => {
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) {
+    return { filter: null, requireAssignment: false };
+  }
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret');
+    if (decoded.role === 'admin') {
+      const normalized = decoded.managedVansh === undefined || decoded.managedVansh === null ? '' : `${decoded.managedVansh}`.trim();
+      if (!normalized) {
+        return { filter: null, requireAssignment: true };
+      }
+      const filter = buildAdminVanshFilter(normalized);
+      return { filter, requireAssignment: false };
+    }
+    return { filter: null, requireAssignment: false };
+  } catch (err) {
+    return { filter: null, requireAssignment: false };
+  }
+};
+
 // Initialize mongoose (used for the optional example route using Model.save())
 try {
   mongoose.connect(mongoUri, { dbName, autoIndex: false });
@@ -107,20 +167,74 @@ app.get('/api/family/members', async (req, res) => {
   try {
     const database = await connectToMongo();
     const collection = database.collection(collectionName);
-    let query = {};
-    
-    // Handle level filtering for root members
-    if (req.query.level) {
-      const level = parseInt(req.query.level);
-      query.level = level;
+    const filters = [];
+
+    if (req.query.level !== undefined) {
+      const level = parseInt(req.query.level, 10);
+      if (!Number.isNaN(level)) {
+        filters.push({ level });
+      }
     }
-    
+
+    const { filter: adminFilter, requireAssignment } = getAdminVanshFilterFromRequest(req);
+    if (requireAssignment) {
+      return res.status(403).json({ error: 'Admin account has no vansh assignment' });
+    }
+    if (adminFilter && Object.keys(adminFilter).length) {
+      filters.push(adminFilter);
+    }
+
+    let query = {};
+    if (filters.length === 1) {
+      query = filters[0];
+    } else if (filters.length > 1) {
+      query = { $and: filters };
+    }
+
     const members = await collection.find(query).toArray();
     console.log(`[family] db=${dbName} coll=${collectionName} query=${JSON.stringify(query)} count=${members.length}`);
     res.json({ members });
   } catch (err) {
     console.error('Error fetching members:', err);
     res.status(500).json({ error: 'Failed to fetch members' });
+  }
+});
+
+// Get total count of members (fast endpoint for dashboard)
+app.get('/api/family/members/count', async (req, res) => {
+  try {
+    const database = await connectToMongo();
+    const collection = database.collection(collectionName);
+    const { vansh } = req.query;
+    let filter = {};
+    if (vansh !== undefined && vansh !== null) {
+      const trimmed = String(vansh).trim();
+      if (trimmed !== '') {
+        const numeric = Number(trimmed);
+        const conditions = [
+          { vansh: trimmed },
+          { 'personalDetails.vansh': trimmed },
+          { 'personalDetails.Vansh': trimmed }
+        ];
+        if (!Number.isNaN(numeric)) {
+          const numericString = numeric.toString();
+          conditions.push(
+            { vansh: numeric },
+            { vansh: numericString },
+            { 'personalDetails.vansh': numeric },
+            { 'personalDetails.vansh': numericString },
+            { 'personalDetails.Vansh': numeric },
+            { 'personalDetails.Vansh': numericString }
+          );
+        }
+        filter = { $or: conditions };
+      }
+    }
+    const count = await collection.countDocuments(filter);
+    res.json({ count });
+  } catch (err) {
+    console.error('Error counting members:', err);
+    res.status(500).json({ error: 'Failed to count members' });
   }
 });
 
@@ -178,6 +292,34 @@ app.get('/api/family/members/by-serno/:serNo', async (req, res) => {
   } catch (err) {
     console.error('Error fetching member by serNo:', err);
     res.status(500).json({ error: 'Failed to fetch member by serial number' });
+  }
+});
+
+// Fetch a single member by MongoDB ID (for admin edit form)
+app.get('/api/family/members/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const database = await connectToMongo();
+    const collection = database.collection(collectionName);
+    
+    // Try to find member by ObjectId first, then by string ID
+    let member;
+    try {
+      const ObjectId = (await import('mongodb')).ObjectId;
+      member = await collection.findOne({ _id: new ObjectId(id) });
+    } catch (objectIdError) {
+      console.log('ObjectId conversion failed, trying string match:', objectIdError.message);
+      member = await collection.findOne({ _id: id });
+    }
+    
+    if (!member) {
+      return res.status(404).json({ success: false, error: 'Family member not found' });
+    }
+    
+    res.json({ success: true, data: member });
+  } catch (err) {
+    console.error('Error fetching member by ID:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch family member' });
   }
 });
 
@@ -653,7 +795,17 @@ app.get('/api/test', (req, res) => {
   res.json({ message: 'Server is running', timestamp: new Date().toISOString() });
 });
 
+// Make connectToMongo available to routes BEFORE mounting them
+app.use(async (req, res, next) => {
+  req.app.locals.connectToMongo = connectToMongo;
+  req.app.locals.db = await connectToMongo();
+  next();
+});
+
 app.use('/api/auth', createAuthRouter(connectToMongo));
+app.use('/api/news', newsRouter);
+app.use('/api/events', eventsRouter);
+app.use('/api/media', mediaRouter);
 
 // Admin routes
 app.get('/api/admin/stats', verifyToken, requireAdmin, async (req, res) => {
@@ -1030,19 +1182,39 @@ app.post('/api/family/add', upload.any(), parseNestedFields, async (req, res) =>
     // Process images - convert to base64 with MIME type
     const processedData = { ...parsedData };
     
-    if (req.files && req.files.length > 0) {
-      req.files.forEach(file => {
-        const fieldName = file.fieldname;
-        const base64Data = file.buffer.toString('base64');
-        const mimeType = file.mimetype;
+    // Helper function to recursively process files in the nested structure
+    const processFilesRecursively = (obj, target, prefix = '') => {
+      Object.entries(obj).forEach(([key, value]) => {
+        const currentPath = prefix ? `${prefix}.${key}` : key;
         
-        // Store as object with data and mimeType for proper reconstruction
-        processedData[fieldName] = {
-          data: base64Data,
-          mimeType: mimeType,
-          filename: file.originalname
-        };
+        if (Array.isArray(value) && value.length > 0 && value[0].buffer) {
+          // This is a file array from multer
+          const file = value[0]; // Take first file if multiple
+          const base64Data = file.buffer.toString('base64');
+          const mimeType = file.mimetype;
+          
+          // Navigate to the correct nested position in target
+          const keys = currentPath.split('.');
+          let current = target;
+          for (let i = 0; i < keys.length - 1; i++) {
+            if (!current[keys[i]]) current[keys[i]] = {};
+            current = current[keys[i]];
+          }
+          
+          current[keys[keys.length - 1]] = {
+            data: base64Data,
+            mimeType: mimeType,
+            originalName: file.originalname
+          };
+        } else if (value && typeof value === 'object' && !Array.isArray(value) && !value.buffer) {
+          // Recurse into nested objects
+          processFilesRecursively(value, target, currentPath);
+        }
       });
+    };
+    
+    if (req.files && typeof req.files === 'object') {
+      processFilesRecursively(req.files, processedData);
     }
     
   // Ensure dotted keys are nested correctly
@@ -1091,10 +1263,471 @@ app.post('/api/dba/family-members-mongoose', verifyToken, requireDBA, async (req
   }
 });
 
+// ============================================
+// NEW ENHANCED TREE ENDPOINTS (Schema Compliant)
+// ============================================
+
+/**
+ * GET /api/family/tree/members-transformed
+ * Returns all members transformed for tree components with current schema
+ * Filtered by vansh if user is admin
+ */
+app.get('/api/family/tree/members-transformed', async (req, res) => {
+  try {
+    const database = await connectToMongo();
+    const collection = database.collection(collectionName);
+    
+    let query = {};
+    const { filter: adminFilter, requireAssignment } = getAdminVanshFilterFromRequest(req);
+    if (requireAssignment) {
+      return res.status(403).json({ error: 'Admin account has no vansh assignment' });
+    }
+    if (adminFilter && Object.keys(adminFilter).length) {
+      query = adminFilter;
+    }
+    
+    const members = await collection.find(query).toArray();
+    const transformed = transformMembersForTree(members);
+    
+    console.log(`[tree] Fetched ${transformed.length} transformed members`);
+    res.json(transformed);
+  } catch (err) {
+    console.error('Error fetching transformed members:', err);
+    res.status(500).json({ error: 'Failed to fetch transformed members' });
+  }
+});
+
+/**
+ * GET /api/family/tree/hierarchical
+ * Returns members grouped by hierarchy level
+ * Filtered by vansh if user is admin
+ */
+app.get('/api/family/tree/hierarchical', async (req, res) => {
+  try {
+    const database = await connectToMongo();
+    const collection = database.collection(collectionName);
+    
+    let query = {};
+    const { filter: adminFilter, requireAssignment } = getAdminVanshFilterFromRequest(req);
+    if (requireAssignment) {
+      return res.status(403).json({ error: 'Admin account has no vansh assignment' });
+    }
+    if (adminFilter && Object.keys(adminFilter).length) {
+      query = adminFilter;
+    }
+    
+    const members = await collection.find(query).toArray();
+    const transformed = transformMembersForTree(members);
+    const hierarchical = getMembersByLevel(transformed);
+    
+    console.log(`[tree] Generated hierarchical structure with ${Object.keys(hierarchical).length} levels`);
+    res.json(hierarchical);
+  } catch (err) {
+    console.error('Error fetching hierarchical structure:', err);
+    res.status(500).json({ error: 'Failed to fetch hierarchical structure' });
+  }
+});
+
+/**
+ * GET /api/family/tree/root/:serNo
+ * Returns tree structure rooted at specified member
+ * Filtered by vansh if user is admin
+ */
+app.get('/api/family/tree/root/:serNo', async (req, res) => {
+  try {
+    const { serNo } = req.params;
+    const database = await connectToMongo();
+    const collection = database.collection(collectionName);
+    
+    let query = {};
+    const { filter: adminFilter, requireAssignment } = getAdminVanshFilterFromRequest(req);
+    if (requireAssignment) {
+      return res.status(403).json({ error: 'Admin account has no vansh assignment' });
+    }
+    if (adminFilter && Object.keys(adminFilter).length) {
+      query = adminFilter;
+    }
+    
+    const members = await collection.find(query).toArray();
+    const transformed = transformMembersForTree(members);
+    const rootSerNo = parseInt(serNo);
+    const tree = buildTreeStructure(transformed, rootSerNo);
+    
+    console.log(`[tree] Built tree rooted at serNo ${serNo}`);
+    res.json(tree);
+  } catch (err) {
+    console.error('Error building tree structure:', err);
+    res.status(500).json({ error: 'Failed to build tree structure' });
+  }
+});
+
+/**
+ * GET /api/family/tree/member/:serNo/subtree
+ * Returns subtree for a specific member (member and all descendants)
+ * Filtered by vansh if user is admin
+ */
+app.get('/api/family/tree/member/:serNo/subtree', async (req, res) => {
+  try {
+    const { serNo } = req.params;
+    const database = await connectToMongo();
+    const collection = database.collection(collectionName);
+    
+    let query = {};
+    const { filter: adminFilter, requireAssignment } = getAdminVanshFilterFromRequest(req);
+    if (requireAssignment) {
+      return res.status(403).json({ error: 'Admin account has no vansh assignment' });
+    }
+    if (adminFilter && Object.keys(adminFilter).length) {
+      query = adminFilter;
+    }
+    
+    // Fetch the member and all descendants
+    const allMembers = await collection.find(query).toArray();
+    const transformed = transformMembersForTree(allMembers);
+    
+    // Find the member and build subtree
+    const memberSerNoNum = parseInt(serNo);
+    const member = transformed.find(m => m.serNo === memberSerNoNum);
+    
+    if (!member) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+    
+    // Track processed members to prevent duplicates
+    const processed = new Set();
+    
+    // Build subtree using member as root
+    function buildSubtree(m) {
+      // Skip if member already processed (prevents duplicates)
+      if (!m || processed.has(m.serNo)) {
+        return null;
+      }
+      processed.add(m.serNo);
+      
+      const children = [];
+      
+      // Add spouse
+      if (m.spouseSerNo) {
+        const spouse = transformed.find(mem => mem.serNo === m.spouseSerNo);
+        if (spouse && !processed.has(spouse.serNo)) {
+          processed.add(spouse.serNo);
+          children.push({
+            ...spouse,
+            relationToParent: 'spouse'
+          });
+        }
+      }
+      
+      // Add children
+      if (m.childrenSerNos && Array.isArray(m.childrenSerNos)) {
+        m.childrenSerNos.forEach(childSerNo => {
+          if (!processed.has(childSerNo)) {
+            const child = transformed.find(mem => mem.serNo === childSerNo);
+            if (child) {
+              const childNode = buildSubtree(child);
+              if (childNode) {
+                children.push(childNode);
+              }
+            }
+          }
+        });
+      }
+      
+      return {
+        ...m,
+        children
+      };
+    }
+    
+    const subtree = buildSubtree(member);
+    console.log(`[tree] Built subtree for member ${serNo}`);
+    res.json(subtree);
+  } catch (err) {
+    console.error('Error fetching member subtree:', err);
+    res.status(500).json({ error: 'Failed to fetch member subtree' });
+  }
+});
+
+/**
+ * GET /api/family/tree/member/:serNo/ancestors
+ * Returns all ancestors of a member (lineage upward)
+ * Filtered by vansh if user is admin
+ */
+app.get('/api/family/tree/member/:serNo/ancestors', async (req, res) => {
+  try {
+    const { serNo } = req.params;
+    const database = await connectToMongo();
+    const collection = database.collection(collectionName);
+    
+    let query = {};
+    const { filter: adminFilter, requireAssignment } = getAdminVanshFilterFromRequest(req);
+    if (requireAssignment) {
+      return res.status(403).json({ error: 'Admin account has no vansh assignment' });
+    }
+    if (adminFilter && Object.keys(adminFilter).length) {
+      query = adminFilter;
+    }
+    
+    const allMembers = await collection.find(query).toArray();
+    const transformed = transformMembersForTree(allMembers);
+    const memberMap = new Map();
+    transformed.forEach(m => memberMap.set(m.serNo, m));
+    
+    const memberSerNoNum = parseInt(serNo);
+    const member = memberMap.get(memberSerNoNum);
+    
+    if (!member) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+    
+    // Traverse upward to find all ancestors
+    const ancestors = [];
+    let current = member;
+    
+    while (current && current.fatherSerNo) {
+      const parent = memberMap.get(current.fatherSerNo);
+      if (!parent) break;
+      ancestors.push(parent);
+      current = parent;
+    }
+    
+    console.log(`[tree] Found ${ancestors.length} ancestors for member ${serNo}`);
+    res.json({
+      member: member,
+      ancestors: ancestors
+    });
+  } catch (err) {
+    console.error('Error fetching ancestors:', err);
+    res.status(500).json({ error: 'Failed to fetch ancestors' });
+  }
+});
+
+/**
+ * GET /api/family/tree/member/:serNo/descendants
+ * Returns all descendants of a member (lineage downward)
+ * Filtered by vansh if user is admin
+ */
+app.get('/api/family/tree/member/:serNo/descendants', async (req, res) => {
+  try {
+    const { serNo } = req.params;
+    const database = await connectToMongo();
+    const collection = database.collection(collectionName);
+    
+    let query = {};
+    const { filter: adminFilter, requireAssignment } = getAdminVanshFilterFromRequest(req);
+    if (requireAssignment) {
+      return res.status(403).json({ error: 'Admin account has no vansh assignment' });
+    }
+    if (adminFilter && Object.keys(adminFilter).length) {
+      query = adminFilter;
+    }
+    
+    const allMembers = await collection.find(query).toArray();
+    const transformed = transformMembersForTree(allMembers);
+    const memberMap = new Map();
+    transformed.forEach(m => memberMap.set(m.serNo, m));
+    
+    const memberSerNoNum = parseInt(serNo);
+    const member = memberMap.get(memberSerNoNum);
+    
+    if (!member) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+    
+    // Track processed descendants to prevent duplicates
+    const processedDescendants = new Set();
+    
+    // Recursively collect all descendants
+    function collectDescendants(m) {
+      const result = [];
+      
+      if (m.childrenSerNos && Array.isArray(m.childrenSerNos)) {
+        m.childrenSerNos.forEach(childSerNo => {
+          // Skip if already processed
+          if (processedDescendants.has(childSerNo)) {
+            return;
+          }
+          processedDescendants.add(childSerNo);
+          
+          const child = memberMap.get(childSerNo);
+          if (child) {
+            result.push(child);
+            result.push(...collectDescendants(child));
+          }
+        });
+      }
+      
+      return result;
+    }
+    
+    const descendants = collectDescendants(member);
+    
+    console.log(`[tree] Found ${descendants.length} descendants for member ${serNo}`);
+    res.json({
+      member: member,
+      descendants: descendants
+    });
+  } catch (err) {
+    console.error('Error fetching descendants:', err);
+    res.status(500).json({ error: 'Failed to fetch descendants' });
+  }
+});
+
+/**
+ * GET /api/family/tree/stats
+ * Returns tree statistics
+ * Filtered by vansh if user is admin
+ */
+app.get('/api/family/tree/stats', async (req, res) => {
+  try {
+    const database = await connectToMongo();
+    const collection = database.collection(collectionName);
+    
+    let query = {};
+    const { filter: adminFilter, requireAssignment } = getAdminVanshFilterFromRequest(req);
+    if (requireAssignment) {
+      return res.status(403).json({ error: 'Admin account has no vansh assignment' });
+    }
+    if (adminFilter && Object.keys(adminFilter).length) {
+      query = adminFilter;
+    }
+    
+    const allMembers = await collection.find(query).toArray();
+    const transformed = transformMembersForTree(allMembers);
+    const hierarchical = getMembersByLevel(transformed);
+    
+    const stats = {
+      totalMembers: transformed.length,
+      levelCounts: Object.fromEntries(
+        Object.entries(hierarchical).map(([level, members]) => [level, members.length])
+      ),
+      maxLevel: Math.max(...Object.keys(hierarchical).map(l => isNaN(l) ? -1 : parseInt(l))),
+      rootMembers: (hierarchical['1'] || hierarchical['0'] || []).length,
+      approvedMembers: transformed.filter(m => m.isapproved).length
+    };
+    
+    console.log(`[tree] Stats:`, stats);
+    res.json(stats);
+  } catch (err) {
+    console.error('Error fetching tree stats:', err);
+    res.status(500).json({ error: 'Failed to fetch tree stats' });
+  }
+});
+
+app.get('/api/family/registrations', async (req, res) => {
+  try {
+    const database = await connectToMongo();
+    const collection = database.collection('Heirarchy_form');
+    const { vansh } = req.query;
+    
+    console.log('[registrations] Received vansh:', vansh, 'Type:', typeof vansh);
+    
+    let filter = {};
+    
+    if (vansh !== undefined && vansh !== null && vansh !== '') {
+      const vanshValue = Number(vansh);
+      if (!isNaN(vanshValue)) {
+        filter = {
+          $or: [
+            { vansh: vanshValue },
+            { vansh: vansh },
+            { 'personalDetails.vansh': vanshValue },
+            { 'personalDetails.vansh': vansh }
+          ]
+        };
+        console.log('[registrations] Applying filter:', JSON.stringify(filter));
+      }
+    }
+    
+    const registrations = await collection.find(filter).toArray();
+    console.log('[registrations] Found:', registrations.length, 'records');
+    res.json({ success: true, data: registrations });
+  } catch (err) {
+    console.error('Error fetching registrations:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch registrations' });
+  }
+});
+
+app.get('/api/family/all', async (req, res) => {
+  try {
+    const database = await connectToMongo();
+    const collection = database.collection('members');
+    const { vansh } = req.query;
+    
+    console.log('[family/all] Received vansh:', vansh, 'Type:', typeof vansh);
+    
+    let filter = {};
+    
+    if (vansh !== undefined && vansh !== null && vansh !== '') {
+      const vanshValue = Number(vansh);
+      if (!isNaN(vanshValue)) {
+        filter = {
+          $or: [
+            { vansh: vanshValue },
+            { vansh: vansh },
+            { 'personalDetails.vansh': vanshValue },
+            { 'personalDetails.vansh': vansh }
+          ]
+        };
+        console.log('[family/all] Applying filter:', JSON.stringify(filter));
+      }
+    }
+    
+    const members = await collection.find(filter).toArray();
+    console.log('[family/all] Found:', members.length, 'members');
+    res.json({ success: true, data: members });
+  } catch (err) {
+    console.error('Error fetching approved members:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch members' });
+  }
+});
+
+app.get('/api/family/rejected', async (req, res) => {
+  try {
+    const database = await connectToMongo();
+    const collection = database.collection('rejectedMemb');
+    const { vansh } = req.query;
+    
+    let filter = {};
+    
+    if (vansh !== undefined && vansh !== null && vansh !== '') {
+      const vanshValue = Number(vansh);
+      if (!isNaN(vanshValue)) {
+        filter = {
+          $or: [
+            { vansh: vanshValue },
+            { vansh: vansh },
+            { 'personalDetails.vansh': vanshValue },
+            { 'personalDetails.vansh': vansh }
+          ]
+        };
+      }
+    }
+    
+    const rejected = await collection.find(filter).toArray();
+    res.json({ success: true, data: rejected });
+  } catch (err) {
+    console.error('Error fetching rejected members:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch rejected members' });
+  }
+});
+
 const port = process.env.PORT || 4000;
 app.listen(port, () => {
   console.log(`Backend listening on port ${port}`);
   console.log(`Test endpoint: http://localhost:${port}/api/test`);
+  console.log(`\n🌳 NEW Tree Endpoints Available:`);
+  console.log(`  GET http://localhost:${port}/api/family/tree/members-transformed`);
+  console.log(`  GET http://localhost:${port}/api/family/tree/hierarchical`);
+  console.log(`  GET http://localhost:${port}/api/family/tree/root/:serNo`);
+  console.log(`  GET http://localhost:${port}/api/family/tree/member/:serNo/subtree`);
+  console.log(`  GET http://localhost:${port}/api/family/tree/member/:serNo/ancestors`);
+  console.log(`  GET http://localhost:${port}/api/family/tree/member/:serNo/descendants`);
+  console.log(`  GET http://localhost:${port}/api/family/tree/stats`);
+  console.log(`\n👨‍💼 Admin Endpoints Available:`);
+  console.log(`  GET http://localhost:${port}/api/family/registrations?vansh=61`);
+  console.log(`  GET http://localhost:${port}/api/family/all?vansh=61`);
+  console.log(`  GET http://localhost:${port}/api/family/rejected?vansh=61`);
 });
 
 

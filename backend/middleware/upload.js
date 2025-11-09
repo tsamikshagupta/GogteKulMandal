@@ -26,22 +26,37 @@ export const parseNestedFields = (req, res, next) => {
     return next();
   }
 
-  const files = {};
-  Object.keys(req.files).forEach(fieldName => {
-    const value = req.files[fieldName];
+  // Multer may set req.files as an array (upload.any()) or as an object (upload.fields()).
+  // Normalize array -> object mapping by fieldname so subsequent logic can treat
+  // both formats uniformly.
+  let filesByField = {};
+
+  if (Array.isArray(req.files)) {
+    req.files.forEach((file) => {
+      filesByField[file.fieldname] = filesByField[file.fieldname] || [];
+      filesByField[file.fieldname].push(file);
+    });
+  } else {
+    // already an object mapping fieldName -> files
+    filesByField = { ...req.files };
+  }
+
+  const nested = {};
+  Object.keys(filesByField).forEach((fieldName) => {
+    const value = filesByField[fieldName];
     const parts = fieldName.split('.');
-    
-    let current = files;
+
+    let current = nested;
     for (let i = 0; i < parts.length - 1; i++) {
       if (!current[parts[i]]) {
         current[parts[i]] = {};
       }
       current = current[parts[i]];
     }
-    
+
     current[parts[parts.length - 1]] = value;
   });
 
-  req.files = files;
+  req.files = nested;
   next();
 };

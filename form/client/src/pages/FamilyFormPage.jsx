@@ -285,7 +285,7 @@ const FilePreviewInput = ({
   );
 };
 
-const TextInput = ({ label, register, required, error, type = "text", ...props }) => (
+const TextInput = ({ label, register, required, error, type = "text", disabled = false, ...props }) => (
   <div className="space-y-2">
     <label className="block text-sm font-medium text-slate-700">
       {label}
@@ -293,7 +293,10 @@ const TextInput = ({ label, register, required, error, type = "text", ...props }
     </label>
     <input
       type={type}
-      className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm transition focus:border-primary-500 focus:ring-primary-500"
+      disabled={disabled}
+      className={`w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm transition focus:border-primary-500 focus:ring-primary-500 ${
+        disabled ? "bg-slate-100 text-slate-400 cursor-not-allowed" : ""
+      }`}
       {...register}
       {...props}
     />
@@ -408,6 +411,8 @@ export default function FamilyFormPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
+  const [fatherSelected, setFatherSelected] = useState(false);
+  const [motherSelected, setMotherSelected] = useState(false);
 
   const {
     register,
@@ -486,6 +491,10 @@ export default function FamilyFormPage() {
         setSubmitMessage("Family member added successfully!");
         reset();
         setCurrentStep(1);
+        setFatherSelected(false);
+        setMotherSelected(false);
+        setFatherPreview(null);
+        setMotherPreview(null);
       }
     } catch (error) {
       setSubmitMessage(
@@ -519,6 +528,21 @@ export default function FamilyFormPage() {
         render: () => (
           <StepSection title="Personal Details">
             <div className="grid gap-6 md:grid-cols-2">
+              <Controller
+                name="personalDetails.vansh"
+                control={control}
+                rules={{
+                  required: "Vansh is required",
+                  min: { value: 1, message: "Vansh must be at least 1" },
+                  max: { value: 110, message: "Vansh must not exceed 110" },
+                }}
+                render={({ field }) => (
+                  <VanshInputField 
+                    field={field} 
+                    error={errors.personalDetails?.vansh?.message} 
+                  />
+                )}
+              />
               <TextInput
                 label="First Name"
                 register={register("personalDetails.firstName", {
@@ -576,19 +600,27 @@ export default function FamilyFormPage() {
                 required
                 error={errors.personalDetails?.isAlive?.message}
               />
-              <TextInput
-                label="Date of Death"
-                type="date"
-                register={register("personalDetails.dateOfDeath")}
-              />
-              <RadioGroup
-                label="Confirm Date of Death?"
-                name="personalDetails.confirmDateOfDeath"
-                control={control}
-                options={radioOptions}
-                required
-                error={errors.personalDetails?.confirmDateOfDeath?.message}
-              />
+              {formValues.personalDetails?.isAlive === "no" && (
+                <>
+                  <TextInput
+                    label="Date of Death"
+                    type="date"
+                    register={register("personalDetails.dateOfDeath", {
+                      required: "Date of death is required when person is not alive",
+                    })}
+                    required
+                    error={errors.personalDetails?.dateOfDeath?.message}
+                  />
+                  <RadioGroup
+                    label="Confirm Date of Death?"
+                    name="personalDetails.confirmDateOfDeath"
+                    control={control}
+                    options={radioOptions}
+                    required
+                    error={errors.personalDetails?.confirmDateOfDeath?.message}
+                  />
+                </>
+              )}
               <TextInput
                 label="Email"
                 type="email"
@@ -706,21 +738,6 @@ export default function FamilyFormPage() {
                 options={radioOptions}
                 required
                 error={errors.personalDetails?.everMarried?.message}
-              />
-              <Controller
-                name="personalDetails.vansh"
-                control={control}
-                rules={{
-                  required: "Vansh is required",
-                  min: { value: 1, message: "Vansh must be at least 1" },
-                  max: { value: 110, message: "Vansh must not exceed 110" },
-                }}
-                render={({ field }) => (
-                  <VanshInputField 
-                    field={field} 
-                    error={errors.personalDetails?.vansh?.message} 
-                  />
-                )}
               />
             </div>
           </StepSection>
@@ -1169,6 +1186,7 @@ export default function FamilyFormPage() {
                   parentType="father"
                   vansh={formValues.personalDetails?.vansh}
                   onSelect={(data) => {
+                    setFatherSelected(true);
                     setValue("parentsInformation.fatherSerNo", data.serNo || null, { shouldValidate: true, shouldDirty: true });
                     setValue("parentsInformation.fatherFirstName", data.firstName || "", { shouldValidate: true, shouldDirty: true });
                     setValue("parentsInformation.fatherMiddleName", data.middleName || "", { shouldValidate: true, shouldDirty: true });
@@ -1218,18 +1236,21 @@ export default function FamilyFormPage() {
                 register={register("parentsInformation.fatherFirstName", {
                   required: "Father's first name is required",
                 })}
+                disabled={fatherSelected}
                 required
                 error={errors.parentsInformation?.fatherFirstName?.message}
               />
               <TextInput
                 label="Father's Middle Name"
                 register={register("parentsInformation.fatherMiddleName")}
+                disabled={fatherSelected}
               />
               <TextInput
                 label="Father's Last Name"
                 register={register("parentsInformation.fatherLastName", {
                   required: "Father's last name is required",
                 })}
+                disabled={fatherSelected}
                 required
                 error={errors.parentsInformation?.fatherLastName?.message}
               />
@@ -1237,6 +1258,7 @@ export default function FamilyFormPage() {
                 label="Father's Email"
                 type="email"
                 register={register("parentsInformation.fatherEmail")}
+                disabled={fatherSelected}
                 error={errors.parentsInformation?.fatherEmail?.message}
               />
               <TextInput
@@ -1249,6 +1271,7 @@ export default function FamilyFormPage() {
                     message: "Minimum 10 digits required",
                   },
                 })}
+                disabled={fatherSelected}
                 required
                 error={errors.parentsInformation?.fatherMobileNumber?.message}
               />
@@ -1258,6 +1281,7 @@ export default function FamilyFormPage() {
                 register={register("parentsInformation.fatherDateOfBirth", {
                   required: "Date of birth is required",
                 })}
+                disabled={fatherSelected}
                 required
                 error={errors.parentsInformation?.fatherDateOfBirth?.message}
               />
@@ -1290,6 +1314,7 @@ export default function FamilyFormPage() {
                   parentType="mother"
                   vansh={formValues.personalDetails?.vansh}
                   onSelect={(data) => {
+                    setMotherSelected(true);
                     setValue("parentsInformation.motherSerNo", data.serNo || null, { shouldValidate: true, shouldDirty: true });
                     setValue("parentsInformation.motherFirstName", data.firstName || "", { shouldValidate: true, shouldDirty: true });
                     setValue("parentsInformation.motherMiddleName", data.middleName || "", { shouldValidate: true, shouldDirty: true });
@@ -1338,18 +1363,21 @@ export default function FamilyFormPage() {
                 register={register("parentsInformation.motherFirstName", {
                   required: "Mother's first name is required",
                 })}
+                disabled={motherSelected}
                 required
                 error={errors.parentsInformation?.motherFirstName?.message}
               />
               <TextInput
                 label="Mother's Middle Name"
                 register={register("parentsInformation.motherMiddleName")}
+                disabled={motherSelected}
               />
               <TextInput
                 label="Mother's Last Name"
                 register={register("parentsInformation.motherLastName", {
                   required: "Mother's last name is required",
                 })}
+                disabled={motherSelected}
                 required
                 error={errors.parentsInformation?.motherLastName?.message}
               />
@@ -1357,6 +1385,7 @@ export default function FamilyFormPage() {
                 label="Mother's Mobile Number"
                 type="tel"
                 register={register("parentsInformation.motherMobileNumber")}
+                disabled={motherSelected}
                 error={errors.parentsInformation?.motherMobileNumber?.message}
               />
               <TextInput
@@ -1365,6 +1394,7 @@ export default function FamilyFormPage() {
                 register={register("parentsInformation.motherDateOfBirth", {
                   required: "Date of birth is required",
                 })}
+                disabled={motherSelected}
                 required
                 error={errors.parentsInformation?.motherDateOfBirth?.message}
               />

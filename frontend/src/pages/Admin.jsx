@@ -1,6 +1,145 @@
-import React, { useState, useEffect } from 'react';
-import { Check, X, User, Calendar, Mail, Phone, MapPin, FileText, Shield, Bell, Search, Clock, AlertCircle, Eye, UserCheck, UserX, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Check, X, User, Calendar, Mail, Phone, MapPin, FileText, Shield, Bell, Search, Clock, AlertCircle, Eye, UserCheck, UserX, RefreshCw, Edit, Trash2 } from 'lucide-react';
 import axios from 'axios';
+import LoadingSpinner from '../components/LoadingSpinner';
+
+// Image compression utility
+const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.8) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions while maintaining aspect ratio
+        if (width > height) {
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = (width * maxHeight) / height;
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to blob with compression
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Canvas to Blob conversion failed'));
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = reject;
+    };
+    reader.onerror = reject;
+  });
+};
+
+// Optimized Member Card Component with React.memo
+const MemberCard = React.memo(({ member, onEdit, onDelete, onView }) => {
+  // Memoize expensive computations
+  const fullName = useMemo(() => {
+    const pd = member.personalDetails;
+    if (!pd) return 'Unknown';
+    return `${pd.firstName || ''} ${pd.middleName || ''} ${pd.lastName || ''}`.trim();
+  }, [member.personalDetails]);
+
+  const formattedDate = useMemo(() => {
+    if (!member.reviewedAt) return 'N/A';
+    const date = new Date(member.reviewedAt);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return date.toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' });
+  }, [member.reviewedAt]);
+
+  const pd = member.personalDetails || {};
+
+  return (
+    <div
+      className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl p-6 border-l-4 border-green-500 hover:shadow-lg transition-all duration-300"
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-3 mb-3">
+            {member.serNo && (
+              <span className="px-3 py-1 bg-orange-500 text-white rounded-lg text-sm font-bold">
+                #{member.serNo}
+              </span>
+            )}
+            <h3 className="text-xl font-bold text-gray-800">{fullName}</h3>
+            <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold">
+              Approved Member
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-700">
+            <div className="flex items-center gap-2 p-2 bg-white/60 rounded-lg">
+              <Mail className="w-4 h-4 text-green-500" />
+              <span className="font-medium">{pd.email || 'N/A'}</span>
+            </div>
+            <div className="flex items-center gap-2 p-2 bg-white/60 rounded-lg">
+              <User className="w-4 h-4 text-green-500" />
+              <span className="font-medium">{pd.gender || 'N/A'}</span>
+            </div>
+            <div className="flex items-center gap-2 p-2 bg-white/60 rounded-lg">
+              <Calendar className="w-4 h-4 text-green-500" />
+              <span className="font-medium">Approved: {formattedDate}</span>
+            </div>
+          </div>
+          <div className="mt-3 text-sm text-gray-600">
+            Vansh: <span className="font-semibold">{pd.vansh || 'N/A'}</span> | 
+            Phone: <span className="font-semibold ml-2">{pd.mobileNumber || 'N/A'}</span>
+            {member.serNo && (
+              <> | SerNo: <span className="font-semibold ml-2">{member.serNo}</span></>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => onEdit(member)}
+            className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-100 rounded-lg transition-colors"
+            title="Edit Member"
+          >
+            <Edit className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => onDelete(member._id)}
+            className="p-2 text-red-500 hover:text-red-700 hover:bg-red-100 rounded-lg transition-colors"
+            title="Delete Member"
+          >
+            <Trash2 className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => onView(member)}
+            className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            title="View Details"
+          >
+            <Eye className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+MemberCard.displayName = 'MemberCard';
 
 // Recursive component to render MongoDB document fields
 const RenderField = ({ fieldKey, value, level }) => {
@@ -176,48 +315,105 @@ const GogteKulAdmin = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [rejectedMembers, setRejectedMembers] = useState([]);
+  const [approvedMembersData, setApprovedMembersData] = useState([]);
   const [showConfirmReject, setShowConfirmReject] = useState(false);
   const [pendingRejection, setPendingRejection] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingMember, setEditingMember] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingMemberId, setDeletingMemberId] = useState(null);
+  const [viewSourceTab, setViewSourceTab] = useState(null); // Track which tab opened the view modal
   
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const recordsPerPage = 10;
+  const [totalApprovedMembers, setTotalApprovedMembers] = useState(0);
+  const [loadingApprovedMembers, setLoadingApprovedMembers] = useState(false);
+  const [adminManagedVansh, setAdminManagedVansh] = useState(null);
 
   // Reset to page 1 when tab changes or search term changes
   useEffect(() => {
     setCurrentPage(1);
   }, [activeTab, searchTerm]);
 
+  const getAdminVansh = async () => {
+    try {
+      const token = localStorage.getItem('authToken');
+      if (token) {
+        const response = await axios.get('http://localhost:4000/api/auth/me', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        console.log('Auth response:', response.data);
+        if (response.data.role === 'master_admin' || response.data.isMasterAdmin) {
+          setAdminManagedVansh('');
+          return '';
+        }
+        if (response.data.managedVansh) {
+          console.log('Setting managedVansh to:', response.data.managedVansh);
+          setAdminManagedVansh(response.data.managedVansh);
+          return response.data.managedVansh;
+        }
+        // Explicitly set to empty string when the admin has no vansh constraint
+        setAdminManagedVansh('');
+        return '';
+      }
+    } catch (err) {
+      console.error('Error fetching admin vansh:', err);
+    }
+    return null;
+  };
+
   // Fetch registrations from server
   useEffect(() => {
-    fetchRegistrations();
-    fetchRejectedMembers();
+    const loadData = async () => {
+      const vansh = await getAdminVansh();
+      await Promise.all([
+        fetchRegistrations(vansh),
+        fetchRejectedMembers(vansh),
+        fetchApprovedMembers(vansh)
+      ]);
+    };
+    loadData();
   }, []);
 
-  const fetchRegistrations = async () => {
+  const fetchRegistrations = async (vansh = adminManagedVansh) => {
     try {
       setLoading(true);
-      // Call the form-gkm server (port 5000) for registrations
-      const response = await axios.get('http://localhost:5000/api/family/registrations');
-      console.log('✅ API Response:', response.data);
+      const url = vansh ? `http://localhost:5000/api/family/registrations?vansh=${vansh}` : 'http://localhost:5000/api/family/registrations';
+      console.log('Fetching registrations from:', url);
+      const response = await axios.get(url);
       if (response.data.success) {
-        console.log('📊 Registrations data:', response.data.data);
-        console.log('📊 Number of registrations:', response.data.data.length);
+        console.log('Received registrations:', response.data.data.length);
         setRegistrations(response.data.data);
       }
     } catch (err) {
-      console.error('❌ Error fetching registrations:', err);
+      console.error('Error fetching registrations:', err);
       setError('Failed to load registrations');
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchRejectedMembers = async () => {
+  const fetchApprovedMembers = async (vansh = adminManagedVansh) => {
     try {
-      const response = await axios.get('http://localhost:5000/api/family/rejected');
+      const url = vansh ? `http://localhost:5000/api/family/all?vansh=${vansh}` : 'http://localhost:5000/api/family/all';
+      console.log('Fetching approved members from:', url);
+      const response = await axios.get(url);
       if (response.data.success) {
-        console.log('📊 Rejected members:', response.data.data.length);
+        console.log('Received approved members:', response.data.data.length);
+        setApprovedMembersData(response.data.data);
+      }
+    } catch (err) {
+      console.error('Error fetching approved members:', err);
+    }
+  };
+
+  const fetchRejectedMembers = async (vansh = adminManagedVansh) => {
+    try {
+      const url = vansh ? `http://localhost:5000/api/family/rejected?vansh=${vansh}` : 'http://localhost:5000/api/family/rejected';
+      const response = await axios.get(url);
+      if (response.data.success) {
         setRejectedMembers(response.data.data);
       }
     } catch (err) {
@@ -227,15 +423,38 @@ const GogteKulAdmin = () => {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchRegistrations();
-    await fetchRejectedMembers();
+    const vansh = adminManagedVansh;
+    await Promise.all([
+      fetchRegistrations(vansh),
+      fetchRejectedMembers(vansh),
+      fetchApprovedMembers(vansh)
+    ]);
     setRefreshing(false);
   };
+
+  // Fetch full details with images when viewing a member
+  const handleViewDetails = useCallback(async (member, sourceTab = null) => {
+    setLoadingDetails(true);
+    setSelectedRequest(member); // Show modal immediately with basic data
+    setViewSourceTab(sourceTab); // Track which tab this was opened from
+    
+    try {
+      // Fetch full details including images
+      const response = await axios.get(`http://localhost:5000/api/family/registrations/${member._id}`);
+      if (response.data.success) {
+        setSelectedRequest(response.data.data); // Update with full data including images
+      }
+    } catch (error) {
+      console.error('❌ Error fetching full details:', error);
+    } finally {
+      setLoadingDetails(false);
+    }
+  }, []);
 
   // Filter registrations by status
   // Treat records without status as 'pending' (for backwards compatibility)
   const allPendingRegistrations = registrations.filter(r => !r.status || r.status === 'pending' || r.status === 'under_review');
-  const allApprovedMembers = registrations.filter(r => r.status === 'approved');
+  const allApprovedMembers = approvedMembersData; // Use data from members collection
   const rejectedRequests = registrations.filter(r => r.status === 'rejected');
 
   // Search filter function
@@ -282,10 +501,10 @@ const GogteKulAdmin = () => {
     });
   };
 
-  // Apply search filter
-  const pendingRegistrations = filterBySearch(allPendingRegistrations);
-  const approvedMembers = filterBySearch(allApprovedMembers);
-  const filteredRejectedMembers = filterBySearch(rejectedMembers);
+  // Apply search filter with useMemo
+  const pendingRegistrations = useMemo(() => filterBySearch(allPendingRegistrations), [allPendingRegistrations, searchTerm]);
+  const approvedMembers = useMemo(() => filterBySearch(allApprovedMembers), [allApprovedMembers, searchTerm]);
+  const filteredRejectedMembers = useMemo(() => filterBySearch(rejectedMembers), [rejectedMembers, searchTerm]);
 
   // Pagination logic
   const getCurrentPageData = (data) => {
@@ -298,10 +517,10 @@ const GogteKulAdmin = () => {
     return Math.ceil(data.length / recordsPerPage);
   };
 
-  // Get paginated data based on active tab
-  const paginatedPendingRegistrations = getCurrentPageData(pendingRegistrations);
-  const paginatedApprovedMembers = getCurrentPageData(approvedMembers);
-  const paginatedRejectedMembers = getCurrentPageData(filteredRejectedMembers);
+  // Get paginated data based on active tab with useMemo
+  const paginatedPendingRegistrations = useMemo(() => getCurrentPageData(pendingRegistrations), [pendingRegistrations, currentPage, recordsPerPage]);
+  const paginatedApprovedMembers = useMemo(() => getCurrentPageData(approvedMembers), [approvedMembers, currentPage, recordsPerPage]);
+  const paginatedRejectedMembers = useMemo(() => getCurrentPageData(filteredRejectedMembers), [filteredRejectedMembers, currentPage, recordsPerPage]);
 
   // Pagination handlers
   const handleNextPage = () => {
@@ -389,11 +608,17 @@ const GogteKulAdmin = () => {
         console.log('✅ Status update successful');
         console.log(`✅ ${status} registration:`, recordId);
         
-        // Hide processing
+        // Hide processing IMMEDIATELY - don't wait for anything
         setIsProcessing(false);
         
+        if (status === 'approved') {
+          fetchApprovedMembers(adminManagedVansh).catch(err => {
+            console.error('⚠️ Failed to fetch approved members:', err);
+          });
+        }
+        
         // Show success popup
-        setSuccessMessage(status === 'approved' ? 'Registration Approved!' : 'Registration Deleted Successfully!');
+        setSuccessMessage(status === 'approved' ? 'Registration Approved! ✅ Email sent to user.' : 'Registration Deleted Successfully!');
         setShowSuccessModal(true);
         
         // Auto-hide after 3 seconds
@@ -419,6 +644,8 @@ const GogteKulAdmin = () => {
       // Show error
       alert(`Failed to update registration status: ${err.response?.data?.message || err.message}`);
     } finally {
+      // Ensure processing state is ALWAYS cleared
+      setIsProcessing(false);
       setApprovalAction(null);
     }
   };
@@ -434,6 +661,104 @@ const GogteKulAdmin = () => {
   const handleBulkAction = (action) => {
     console.log(`Bulk ${action}:`, selectedMembers);
     setSelectedMembers([]);
+  };
+
+  // CRUD handlers for approved members with useCallback
+  const handleEditMember = useCallback(async (member) => {
+    try {
+      // Set loading state and open modal immediately with current data
+      setEditingMember({ ...member, _loading: true });
+      setShowEditModal(true);
+      
+      // Fetch full member details including all fields in background
+      const response = await axios.get(`http://localhost:5000/api/family/members/${member._id}`);
+      if (response.data.success) {
+        setEditingMember(response.data.data);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching member details:', error);
+      // Keep the modal open with current data if fetch fails
+      setEditingMember({ ...member, _loading: false });
+      alert('Could not load complete member details. Showing available data.');
+    }
+  }, []);
+
+  // Close edit modal on Escape key
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && showEditModal) {
+        setShowEditModal(false);
+        setEditingMember(null);
+      }
+    };
+    
+    if (showEditModal) {
+      document.addEventListener('keydown', handleEscape);
+      return () => document.removeEventListener('keydown', handleEscape);
+    }
+  }, [showEditModal]);
+
+  const handleUpdateMember = async (updatedData) => {
+    if (!editingMember) return;
+    
+    try {
+      setIsProcessing(true);
+      const response = await axios.put(
+        `http://localhost:5000/api/family/members/${editingMember._id}`,
+        updatedData
+      );
+
+      if (response.data.success) {
+        setSuccessMessage('Member updated successfully! ✅');
+        setShowSuccessModal(true);
+        setShowEditModal(false);
+        setEditingMember(null);
+        await fetchApprovedMembers(adminManagedVansh);
+        
+        setTimeout(() => {
+          setShowSuccessModal(false);
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('❌ Error updating member:', error);
+      alert(`Failed to update member: ${error.response?.data?.message || error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDeleteMember = useCallback((memberId) => {
+    setDeletingMemberId(memberId);
+    setShowDeleteConfirm(true);
+  }, []);
+
+  const confirmDeleteMember = async () => {
+    if (!deletingMemberId) return;
+    
+    try {
+      setIsProcessing(true);
+      setShowDeleteConfirm(false);
+      
+      const response = await axios.delete(
+        `http://localhost:5000/api/family/members/${deletingMemberId}`
+      );
+
+      if (response.data.success) {
+        setSuccessMessage('Member deleted successfully! 🗑️');
+        setShowSuccessModal(true);
+        setDeletingMemberId(null);
+        await fetchApprovedMembers(adminManagedVansh);
+        
+        setTimeout(() => {
+          setShowSuccessModal(false);
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('❌ Error deleting member:', error);
+      alert(`Failed to delete member: ${error.response?.data?.message || error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // Helper function to format date
@@ -471,26 +796,13 @@ const GogteKulAdmin = () => {
     return (
       <div className="min-h-screen bg-[#fff8f2] flex items-center justify-center">
         <div className="flex flex-col items-center gap-6">
-          {/* Custom loading spinner */}
-          <div className="relative flex flex-col items-center justify-center w-44 h-44">
-            <span className="relative z-10 flex items-center justify-center w-32 h-32 rounded-full bg-white shadow-lg border-2 border-amber-100">
-              <span className="absolute inset-0 w-full h-full rounded-full border-4 border-amber-500 border-t-transparent border-b-transparent animate-spin"></span>
-              <img
-                src="/axe.png"
-                alt="Axe Icon"
-                className="w-24 h-24 object-contain rounded-full shadow-md z-10"
-                style={{ background: 'radial-gradient(circle at 60% 40%, #ffe0b2 60%, #fff8f2 100%)' }}
-              />
-            </span>
-          </div>
-          
-          {/* Loading message */}
+          <LoadingSpinner />
           <div className="bg-white/95 backdrop-blur-md rounded-2xl px-10 py-6 shadow-2xl border-2 border-orange-200">
             <p className="text-2xl font-bold text-center text-red-600 mb-2">
-              Loading registrations...
+              Loading Admin Dashboard...
             </p>
             <p className="text-base font-semibold text-center text-gray-800">
-              This might take a moment. Please hold on!
+              Fetching registrations and member data
             </p>
           </div>
         </div>
@@ -509,6 +821,18 @@ const GogteKulAdmin = () => {
           >
             Retry
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (adminManagedVansh === null) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-400 via-red-400 to-purple-600 flex items-center justify-center">
+        <div className="bg-white rounded-lg p-12 shadow-2xl text-center">
+          <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
+          <p className="text-gray-800 text-xl font-semibold">Loading admin dashboard...</p>
+          <p className="text-gray-600 text-sm mt-2">Retrieving your access permissions</p>
         </div>
       </div>
     );
@@ -775,7 +1099,7 @@ const GogteKulAdmin = () => {
 
                           <div className="flex flex-col gap-3 ml-6">
                             <button
-                              onClick={() => setSelectedRequest(request)}
+                              onClick={() => handleViewDetails(request, 'pending')}
                               className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-all text-sm font-medium flex items-center gap-2"
                             >
                               <Eye className="w-4 h-4" />
@@ -819,58 +1143,15 @@ const GogteKulAdmin = () => {
                   </div>
                 ) : (
                   <>
-                    {paginatedApprovedMembers.map((member) => {
-                    const fullName = getFullName(member);
-                    const pd = member.personalDetails || {};
-
-                    return (
-                      <div
+                    {paginatedApprovedMembers.map((member) => (
+                      <MemberCard
                         key={member._id}
-                        className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl p-6 border-l-4 border-green-500 hover:shadow-lg transition-all duration-300"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-3">
-                              <h3 className="text-xl font-bold text-gray-800">{fullName}</h3>
-                              <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold">
-                                Approved Member
-                              </span>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-700">
-                              <div className="flex items-center gap-2 p-2 bg-white/60 rounded-lg">
-                                <Mail className="w-4 h-4 text-green-500" />
-                                <span className="font-medium">{pd.email || 'N/A'}</span>
-                              </div>
-                              <div className="flex items-center gap-2 p-2 bg-white/60 rounded-lg">
-                                <User className="w-4 h-4 text-green-500" />
-                                <span className="font-medium">{pd.gender || 'N/A'}</span>
-                              </div>
-                              <div className="flex items-center gap-2 p-2 bg-white/60 rounded-lg">
-                                <Calendar className="w-4 h-4 text-green-500" />
-                                <span className="font-medium">Approved: {formatDate(member.reviewedAt)}</span>
-                              </div>
-                            </div>
-                            <div className="mt-3 text-sm text-gray-600">
-                              Vansh: <span className="font-semibold">{pd.vansh || 'N/A'}</span> | 
-                              Phone: <span className="font-semibold ml-2">{pd.mobileNumber || 'N/A'}</span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="px-4 py-2 bg-green-100 text-green-700 rounded-full text-sm font-semibold flex items-center gap-2">
-                              <Check className="w-4 h-4" />
-                              Active Member
-                            </span>
-                            <button 
-                              onClick={() => setSelectedRequest(member)}
-                              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
-                              <Eye className="w-5 h-5" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                        member={member}
+                        onEdit={handleEditMember}
+                        onDelete={handleDeleteMember}
+                        onView={(m) => handleViewDetails(m, 'approved')}
+                      />
+                    ))}
                   </>
                 )}
               </div>
@@ -927,7 +1208,7 @@ const GogteKulAdmin = () => {
                           </div>
                           <div className="flex items-center gap-2">
                             <button 
-                              onClick={() => setSelectedRequest(request)}
+                              onClick={() => handleViewDetails(request, 'rejected')}
                               className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
                             >
                               <Eye className="w-5 h-5" />
@@ -1099,6 +1380,15 @@ const GogteKulAdmin = () => {
             </div>
             
             <div className="p-8 space-y-6">
+              {loadingDetails && (
+                <div className="flex items-center justify-center py-8">
+                  <div className="flex items-center gap-3">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500"></div>
+                    <span className="text-gray-600">Loading full details with images...</span>
+                  </div>
+                </div>
+              )}
+              
               {/* Personal Details Section */}
               {selectedRequest.personalDetails && (
                 <div className="rounded-3xl bg-white p-8 shadow-card ring-1 ring-slate-100">
@@ -1162,7 +1452,7 @@ const GogteKulAdmin = () => {
 
               {/* Other Sections - Display any remaining fields */}
               {Object.entries(selectedRequest)
-                .filter(([key]) => !['_id', 'createdAt', 'updatedAt', '__v', 'status', 'adminNotes', 'reviewedAt', 'personalDetails', 'parentsInformation', 'spouseInformation', 'childrenInformation'].includes(key))
+                .filter(([key]) => !['_id', 'createdAt', 'updatedAt', '__v', 'status', 'adminNotes', 'reviewedAt', 'personalDetails', 'parentsInformation', 'spouseInformation', 'childrenInformation', '_sheetRowKey', 'password'].includes(key))
                 .map(([sectionKey, sectionValue]) => {
                   if (!sectionValue || (typeof sectionValue === 'object' && Object.keys(sectionValue).length === 0)) return null;
                   
@@ -1206,31 +1496,42 @@ const GogteKulAdmin = () => {
             
             <div className="p-8 border-t border-gray-200 bg-gray-50/50 flex gap-4 justify-end rounded-b-3xl">
               <button
-                onClick={() => setSelectedRequest(null)}
+                onClick={() => {
+                  setSelectedRequest(null);
+                  setViewSourceTab(null);
+                }}
                 className="px-8 py-3 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-100 font-semibold transition-all"
               >
                 Close
               </button>
-              <button
-                onClick={() => {
-                  handleReject(selectedRequest.id, selectedRequest);
-                  setSelectedRequest(null);
-                }}
-                className="px-8 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 flex items-center gap-2 font-semibold transition-all"
-              >
-                <X className="w-5 h-5" />
-                Reject Application
-              </button>
-              <button
-                onClick={() => {
-                  handleApprove(selectedRequest.id, selectedRequest);
-                  setSelectedRequest(null);
-                }}
-                className="px-8 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 flex items-center gap-2 font-semibold transition-all"
-              >
-                <Check className="w-5 h-5" />
-                Approve Application
-              </button>
+              
+              {/* Show Approve/Reject buttons only for pending requests */}
+              {viewSourceTab === 'pending' && (
+                <>
+                  <button
+                    onClick={() => {
+                      handleReject(selectedRequest._id, selectedRequest);
+                      setSelectedRequest(null);
+                      setViewSourceTab(null);
+                    }}
+                    className="px-8 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 flex items-center gap-2 font-semibold transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                    Reject Application
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleApprove(selectedRequest._id, selectedRequest);
+                      setSelectedRequest(null);
+                      setViewSourceTab(null);
+                    }}
+                    className="px-8 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 flex items-center gap-2 font-semibold transition-all"
+                  >
+                    <Check className="w-5 h-5" />
+                    Approve Application
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1358,6 +1659,819 @@ const GogteKulAdmin = () => {
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl">
+            <div className="p-6">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center bg-red-100">
+                  <AlertCircle className="w-8 h-8 text-red-600" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-800 mb-2">
+                  Delete Member?
+                </h3>
+                <p className="text-gray-600">
+                  Are you sure you want to delete this member? This action cannot be undone.
+                </p>
+              </div>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteConfirm(false);
+                    setDeletingMemberId(null);
+                  }}
+                  className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-100 font-semibold transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDeleteMember}
+                  className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold transition-all"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Member Modal - Comprehensive with all fields */}
+      {showEditModal && editingMember && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto"
+          onClick={(e) => {
+            // Close modal when clicking on backdrop
+            if (e.target === e.currentTarget) {
+              setShowEditModal(false);
+              setEditingMember(null);
+            }
+          }}
+        >
+          <div className="bg-white rounded-2xl max-w-6xl w-full shadow-2xl my-8" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-amber-50 flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-800">Edit Member - Complete Record</h3>
+                <p className="text-sm text-gray-600 mt-1">All fields are editable. Leave empty to keep current value.</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setEditingMember(null);
+                }}
+                className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
+                title="Close"
+              >
+                <X className="w-6 h-6 text-gray-600" />
+              </button>
+            </div>
+            <div className="p-6 max-h-[75vh] overflow-y-auto">
+              {editingMember._loading && (
+                <div className="mb-4 p-4 bg-blue-50 border border-blue-300 rounded-lg">
+                  <p className="text-blue-700 text-sm">⏳ Loading complete member details...</p>
+                </div>
+              )}
+              <form 
+                key={`${editingMember._id}-${editingMember._loading ? 'loading' : 'loaded'}`}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target);
+                  const updatedData = {};
+                  
+                  // Initialize nested objects
+                  const personalDetails = { ...editingMember.personalDetails };
+                  const parentsInformation = { ...editingMember.parentsInformation };
+                  const marriedDetails = { ...editingMember.marriedDetails };
+                
+                formData.forEach((value, key) => {
+                  if (key.startsWith('pd_')) {
+                    personalDetails[key.replace('pd_', '')] = value;
+                  } else if (key.startsWith('pi_')) {
+                    parentsInformation[key.replace('pi_', '')] = value;
+                  } else if (key.startsWith('md_')) {
+                    marriedDetails[key.replace('md_', '')] = value;
+                  } else {
+                    updatedData[key] = value;
+                  }
+                });
+                
+                updatedData.personalDetails = personalDetails;
+                updatedData.parentsInformation = parentsInformation;
+                updatedData.marriedDetails = marriedDetails;
+                
+                // Convert numeric fields
+                if (updatedData.serNo) updatedData.serNo = parseInt(updatedData.serNo);
+                if (updatedData.fatherSerNo) updatedData.fatherSerNo = parseInt(updatedData.fatherSerNo);
+                if (updatedData.motherSerNo) updatedData.motherSerNo = parseInt(updatedData.motherSerNo);
+                if (updatedData.spouseSerNo) updatedData.spouseSerNo = parseInt(updatedData.spouseSerNo);
+                if (updatedData.level) updatedData.level = parseInt(updatedData.level);
+                
+                // Handle childrenSerNos - convert comma-separated string to array of numbers
+                if (updatedData.childrenSerNos) {
+                  const childrenStr = updatedData.childrenSerNos.trim();
+                  if (childrenStr) {
+                    updatedData.childrenSerNos = childrenStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+                  } else {
+                    updatedData.childrenSerNos = [];
+                  }
+                }
+                
+                handleUpdateMember(updatedData);
+              }}>
+                
+                {/* Basic Information */}
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-orange-300">Basic Information</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-orange-50 p-4 rounded-lg border-2 border-orange-300">
+                      <label className="block text-sm font-bold text-orange-700 mb-1">
+                        Serial Number (serNo) * 🔢
+                      </label>
+                      <input
+                        type="number"
+                        name="serNo"
+                        defaultValue={editingMember.serNo || ''}
+                        required
+                        className="w-full px-4 py-2 border-2 border-orange-400 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent font-bold text-lg"
+                      />
+                      <p className="text-xs text-orange-600 mt-1">Unique identifier for this member</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Vansh</label>
+                      <input
+                        type="text"
+                        name="vansh"
+                        defaultValue={editingMember.personalDetails?.vansh || editingMember.vansh || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
+                      <input
+                        type="number"
+                        name="level"
+                        defaultValue={editingMember.level || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Personal Details */}
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-orange-300">Personal Details</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
+                      <input
+                        type="text"
+                        name="pd_firstName"
+                        defaultValue={editingMember.personalDetails?.firstName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Middle Name</label>
+                      <input
+                        type="text"
+                        name="pd_middleName"
+                        defaultValue={editingMember.personalDetails?.middleName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Last Name *</label>
+                      <input
+                        type="text"
+                        name="pd_lastName"
+                        defaultValue={editingMember.personalDetails?.lastName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+                      <select
+                        name="pd_gender"
+                        defaultValue={editingMember.personalDetails?.gender || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      >
+                        <option value="">Select Gender</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth</label>
+                      <input
+                        type="date"
+                        name="pd_dateOfBirth"
+                        defaultValue={editingMember.personalDetails?.dateOfBirth ? new Date(editingMember.personalDetails.dateOfBirth).toISOString().split('T')[0] : ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Is Alive</label>
+                      <select
+                        name="pd_isAlive"
+                        defaultValue={editingMember.personalDetails?.isAlive || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      >
+                        <option value="">Select</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                      <input
+                        type="email"
+                        name="pd_email"
+                        defaultValue={editingMember.personalDetails?.email || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Number</label>
+                      <input
+                        type="tel"
+                        name="pd_mobileNumber"
+                        defaultValue={editingMember.personalDetails?.mobileNumber || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Ever Married</label>
+                      <select
+                        name="pd_everMarried"
+                        defaultValue={editingMember.personalDetails?.everMarried || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      >
+                        <option value="">Select</option>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Qualifications</label>
+                      <input
+                        type="text"
+                        name="pd_qualifications"
+                        defaultValue={editingMember.personalDetails?.qualifications || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Profession</label>
+                      <input
+                        type="text"
+                        name="pd_profession"
+                        defaultValue={editingMember.personalDetails?.profession || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Profile Photo</label>
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="file"
+                          name="pd_profileImage"
+                          accept="image/*"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const compressedBlob = await compressImage(file);
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  const preview = document.getElementById('preview-pd-profile');
+                                  if (preview) preview.src = reader.result;
+                                };
+                                reader.readAsDataURL(compressedBlob);
+                              } catch (error) {
+                                console.error('Compression failed:', error);
+                              }
+                            }
+                          }}
+                        />
+                        {editingMember.personalDetails?.profileImage && (
+                          <img
+                            id="preview-pd-profile"
+                            src={`data:${editingMember.personalDetails.profileImage.mimeType};base64,${editingMember.personalDetails.profileImage.data}`}
+                            alt="Profile"
+                            className="h-16 w-16 rounded-full object-cover border-2 border-gray-300"
+                          />
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Upload a new photo to change (max 800x800px, compressed to ~50-100KB)</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Address Information */}
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-orange-300">Address Information</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                      <input
+                        type="text"
+                        name="pd_country"
+                        defaultValue={editingMember.personalDetails?.country || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                      <input
+                        type="text"
+                        name="pd_state"
+                        defaultValue={editingMember.personalDetails?.state || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">District</label>
+                      <input
+                        type="text"
+                        name="pd_district"
+                        defaultValue={editingMember.personalDetails?.district || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                      <input
+                        type="text"
+                        name="pd_city"
+                        defaultValue={editingMember.personalDetails?.city || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Area</label>
+                      <input
+                        type="text"
+                        name="pd_area"
+                        defaultValue={editingMember.personalDetails?.area || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">PIN Code</label>
+                      <input
+                        type="text"
+                        name="pd_pinCode"
+                        defaultValue={editingMember.personalDetails?.pinCode || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Parents Information */}
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-orange-300">Parents Information</h4>
+                  
+                  {/* Father Details */}
+                  <h5 className="text-md font-semibold text-gray-700 mb-3 mt-4">Father Details</h5>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Father SerNo</label>
+                      <input
+                        type="number"
+                        name="fatherSerNo"
+                        defaultValue={editingMember.fatherSerNo || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Father First Name</label>
+                      <input
+                        type="text"
+                        name="pi_fatherFirstName"
+                        defaultValue={editingMember.parentsInformation?.fatherFirstName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Father Middle Name</label>
+                      <input
+                        type="text"
+                        name="pi_fatherMiddleName"
+                        defaultValue={editingMember.parentsInformation?.fatherMiddleName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Father Last Name</label>
+                      <input
+                        type="text"
+                        name="pi_fatherLastName"
+                        defaultValue={editingMember.parentsInformation?.fatherLastName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Father Email</label>
+                      <input
+                        type="email"
+                        name="pi_fatherEmail"
+                        defaultValue={editingMember.parentsInformation?.fatherEmail || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Father Mobile Number</label>
+                      <input
+                        type="tel"
+                        name="pi_fatherMobileNumber"
+                        defaultValue={editingMember.parentsInformation?.fatherMobileNumber || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Father Date of Birth</label>
+                      <input
+                        type="date"
+                        name="pi_fatherDateOfBirth"
+                        defaultValue={editingMember.parentsInformation?.fatherDateOfBirth ? new Date(editingMember.parentsInformation.fatherDateOfBirth).toISOString().split('T')[0] : ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Father Profile Photo</label>
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="file"
+                          name="pi_fatherProfileImage"
+                          accept="image/*"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const compressedBlob = await compressImage(file);
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  const preview = document.getElementById('preview-father-profile');
+                                  if (preview) preview.src = reader.result;
+                                };
+                                reader.readAsDataURL(compressedBlob);
+                              } catch (error) {
+                                console.error('Compression failed:', error);
+                              }
+                            }
+                          }}
+                        />
+                        {editingMember.parentsInformation?.fatherProfileImage && (
+                          <img
+                            id="preview-father-profile"
+                            src={`data:${editingMember.parentsInformation.fatherProfileImage.mimeType};base64,${editingMember.parentsInformation.fatherProfileImage.data}`}
+                            alt="Father"
+                            className="h-16 w-16 rounded-full object-cover border-2 border-gray-300"
+                          />
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Upload a new photo to change (compressed to ~50-100KB)</p>
+                    </div>
+                  </div>
+                  
+                  {/* Mother Details */}
+                  <h5 className="text-md font-semibold text-gray-700 mb-3 mt-6">Mother Details</h5>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mother SerNo</label>
+                      <input
+                        type="number"
+                        name="motherSerNo"
+                        defaultValue={editingMember.motherSerNo || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mother First Name</label>
+                      <input
+                        type="text"
+                        name="pi_motherFirstName"
+                        defaultValue={editingMember.parentsInformation?.motherFirstName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mother Middle Name</label>
+                      <input
+                        type="text"
+                        name="pi_motherMiddleName"
+                        defaultValue={editingMember.parentsInformation?.motherMiddleName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mother Last Name</label>
+                      <input
+                        type="text"
+                        name="pi_motherLastName"
+                        defaultValue={editingMember.parentsInformation?.motherLastName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mother Email</label>
+                      <input
+                        type="email"
+                        name="pi_motherEmail"
+                        defaultValue={editingMember.parentsInformation?.motherEmail || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mother Mobile Number</label>
+                      <input
+                        type="tel"
+                        name="pi_motherMobileNumber"
+                        defaultValue={editingMember.parentsInformation?.motherMobileNumber || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mother Date of Birth</label>
+                      <input
+                        type="date"
+                        name="pi_motherDateOfBirth"
+                        defaultValue={editingMember.parentsInformation?.motherDateOfBirth ? new Date(editingMember.parentsInformation.motherDateOfBirth).toISOString().split('T')[0] : ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Mother Profile Photo</label>
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="file"
+                          name="pi_motherProfileImage"
+                          accept="image/*"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const compressedBlob = await compressImage(file);
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  const preview = document.getElementById('preview-mother-profile');
+                                  if (preview) preview.src = reader.result;
+                                };
+                                reader.readAsDataURL(compressedBlob);
+                              } catch (error) {
+                                console.error('Compression failed:', error);
+                              }
+                            }
+                          }}
+                        />
+                        {editingMember.parentsInformation?.motherProfileImage && (
+                          <img
+                            id="preview-mother-profile"
+                            src={`data:${editingMember.parentsInformation.motherProfileImage.mimeType};base64,${editingMember.parentsInformation.motherProfileImage.data}`}
+                            alt="Mother"
+                            className="h-16 w-16 rounded-full object-cover border-2 border-gray-300"
+                          />
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Upload a new photo to change (compressed to ~50-100KB)</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Marriage Information */}
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-orange-300">Marriage Information</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse SerNo</label>
+                      <input
+                        type="number"
+                        name="spouseSerNo"
+                        defaultValue={editingMember.spouseSerNo || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse First Name</label>
+                      <input
+                        type="text"
+                        name="md_spouseFirstName"
+                        defaultValue={editingMember.marriedDetails?.spouseFirstName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse Last Name</label>
+                      <input
+                        type="text"
+                        name="md_spouseLastName"
+                        defaultValue={editingMember.marriedDetails?.spouseLastName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Date of Marriage</label>
+                      <input
+                        type="date"
+                        name="md_dateOfMarriage"
+                        defaultValue={editingMember.marriedDetails?.dateOfMarriage ? new Date(editingMember.marriedDetails.dateOfMarriage).toISOString().split('T')[0] : ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Account Information */}
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-orange-300">Account Information</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                      <input
+                        type="text"
+                        name="username"
+                        defaultValue={editingMember.username || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Password (leave empty to keep current)</label>
+                      <input
+                        type="text"
+                        name="password"
+                        placeholder="Enter new password or leave empty"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Spouse SerNo and Additional Marriage Details */}
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-orange-300">Additional Spouse Information</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse SerNo</label>
+                      <input
+                        type="number"
+                        name="spouseSerNo"
+                        defaultValue={editingMember.spouseSerNo || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse Middle Name</label>
+                      <input
+                        type="text"
+                        name="md_spouseMiddleName"
+                        defaultValue={editingMember.marriedDetails?.spouseMiddleName || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse Email</label>
+                      <input
+                        type="email"
+                        name="md_spouseEmail"
+                        defaultValue={editingMember.marriedDetails?.spouseEmail || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse Mobile Number</label>
+                      <input
+                        type="tel"
+                        name="md_spouseMobileNumber"
+                        defaultValue={editingMember.marriedDetails?.spouseMobileNumber || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse Date of Birth</label>
+                      <input
+                        type="date"
+                        name="md_spouseDateOfBirth"
+                        defaultValue={editingMember.marriedDetails?.spouseDateOfBirth ? new Date(editingMember.marriedDetails.spouseDateOfBirth).toISOString().split('T')[0] : ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse Gender</label>
+                      <select
+                        name="md_spouseGender"
+                        defaultValue={editingMember.marriedDetails?.spouseGender || ''}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      >
+                        <option value="">Select...</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Spouse Profile Photo</label>
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="file"
+                          name="md_spouseProfileImage"
+                          accept="image/*"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const compressedBlob = await compressImage(file);
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  const preview = document.getElementById('preview-spouse-profile');
+                                  if (preview) preview.src = reader.result;
+                                };
+                                reader.readAsDataURL(compressedBlob);
+                              } catch (error) {
+                                console.error('Compression failed:', error);
+                              }
+                            }
+                          }}
+                        />
+                        {editingMember.marriedDetails?.spouseProfileImage && (
+                          <img
+                            id="preview-spouse-profile"
+                            src={`data:${editingMember.marriedDetails.spouseProfileImage.mimeType};base64,${editingMember.marriedDetails.spouseProfileImage.data}`}
+                            alt="Spouse"
+                            className="h-16 w-16 rounded-full object-cover border-2 border-gray-300"
+                          />
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">Upload a new photo to change (compressed to ~50-100KB)</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Children SerNos */}
+                <div className="mb-8">
+                  <h4 className="text-lg font-bold text-gray-800 mb-4 pb-2 border-b-2 border-orange-300">Children Information</h4>
+                  <div className="grid grid-cols-1 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Children SerNos (comma-separated)</label>
+                      <input
+                        type="text"
+                        name="childrenSerNos"
+                        defaultValue={
+                          Array.isArray(editingMember.childrenSerNos) 
+                            ? editingMember.childrenSerNos.join(', ') 
+                            : (editingMember.childrenSerNos || '')
+                        }
+                        placeholder="e.g., 5, 6, 7"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Enter serial numbers separated by commas</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex gap-3 mt-6 pt-6 border-t border-gray-200 bg-gray-50 p-4 rounded-b-2xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEditModal(false);
+                      setEditingMember(null);
+                    }}
+                    className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-xl hover:bg-gray-100 font-semibold transition-all"
+                  >
+                    ✕ Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isProcessing}
+                    className="flex-1 px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-5 h-5" />
+                        Save All Changes
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>

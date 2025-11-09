@@ -22,14 +22,15 @@ import Dashboard from './pages/UserDashboard';
 import { Dashboard as DBADashboard } from './pages/DBA_Dashboard';
 import GogteKulAdmin from './pages/Admin';
 import Profile from './pages/Profile';
-import FamilyTreePage from './pages/FamilyTreePage';
 import LoadingSpinner from './components/LoadingSpinner';
 import GranthPage from './pages/GranthPage';
-import GogteEventsPage from './pages/GogteEvents';
-import GogteNewsPage from './pages/GogteNews';
+import GogteEventsPage from './pages/EventsPage';
+import GogteNewsPage from './pages/NewsPage';
 import RemembranceDayPage from './pages/RemembranceDayPage';
 import VaatchaalPage from './pages/VaatchaalPage';
 import NewsApp from './pages/app';
+import FamilyMemberDetailsPage from './pages/FamilyMemberDetailsPage';
+import Kulavruksh from './pages/Kulavruksh';
 console.log("React version at runtime:", React.version);
 
 function AppRoutesWithLoader() {
@@ -40,11 +41,11 @@ function AppRoutesWithLoader() {
   useEffect(() => {
     setLoading(true);
     setShowContent(false);
-    // Always show spinner for at least 600ms, then fade in content
+    // Reduced loading time for faster page access
     const timer = setTimeout(() => {
       setLoading(false);
-      setTimeout(() => setShowContent(true), 100); // Small delay for fade transition
-    }, 700);
+      setTimeout(() => setShowContent(true), 100); // Smooth fade transition
+    }, 300);
     return () => clearTimeout(timer);
   }, [location]);
 
@@ -63,7 +64,6 @@ function AppRoutesWithLoader() {
           <Route path="/" element={<HomePageWithFooter />} />
           <Route path="/vyadeshwar" element={<VyadeshwarPage />} />
           <Route path="/yogeshwaridevi" element={<YogeshwariDeviPage />} />
-          <Route path="/kulavruksh" element={<FamilyTreePage />} />
           <Route path="/kulvruttantsamiti" element={<KulvruttantSamitiPage />} />
           <Route path="/presidentsthoughts" element={<PresidentsThoughtsPage />} />
           <Route path="/contact" element={<ContactPage />} />
@@ -72,6 +72,7 @@ function AppRoutesWithLoader() {
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/kulavruksh" element={<Kulavruksh />} />
           </Route>
           <Route element={<DBAProtectedRoute />}>
             <Route path="/dba-dashboard" element={<DBADashboard />} />
@@ -90,6 +91,8 @@ function AppRoutesWithLoader() {
           <Route path="/news-app" element={<NewsApp />} />
           <Route path="/remembrance-day" element={<RemembranceDayPage />} />
           <Route path="/gogte-vaatchaal" element={<VaatchaalPage />} />
+          <Route path="/family/member/:serNo" element={<FamilyMemberDetailsPage />} />
+          <Route path="/family/member/:serNo/descendants" element={<FamilyMemberDetailsPage descendantsOnly />} />
         </Routes>
       </div>
     </div>

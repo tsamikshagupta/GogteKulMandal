@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Filter, Search, Calendar, Users, Star, RefreshCw, User, Clock, Heart, MessageCircle, X, Send } from 'lucide-react';
+import { Filter, Search, Calendar, Users, Star, RefreshCw, User, Clock, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { AddNewsModal } from './AddNewsModal';
 import Footer from '../components/Footer';
@@ -125,58 +125,7 @@ export default function GogteNewsPage() {
     setShowDetailModal(true);
   };
 
-  const handleLike = (newsId) => {
-    setNews(prevNews => 
-      prevNews.map(item => 
-        item.id === newsId 
-          ? { 
-              ...item, 
-              likes: item.likes + 1,
-              likedBy: [...(item.likedBy || []), 'currentUser'] // Track who liked
-            }
-          : item
-      )
-    );
-    
-    // Also update selectedNews if it's the same item
-    if (selectedNews && selectedNews.id === newsId) {
-      setSelectedNews(prev => ({ 
-        ...prev, 
-        likes: prev.likes + 1,
-        likedBy: [...(prev.likedBy || []), 'currentUser']
-      }));
-    }
-  };
 
-  const handleAddComment = (newsId, comment) => {
-    const newComment = {
-      id: Date.now(),
-      text: comment,
-      author: "You",
-      timestamp: "Just now"
-    };
-
-    setNews(prevNews => 
-      prevNews.map(item => 
-        item.id === newsId 
-          ? { 
-              ...item, 
-              comments: item.comments + 1,
-              commentsList: [...(item.commentsList || []), newComment]
-            }
-          : item
-      )
-    );
-    
-    // Also update selectedNews if it's the same item
-    if (selectedNews && selectedNews.id === newsId) {
-      setSelectedNews(prev => ({ 
-        ...prev, 
-        comments: prev.comments + 1,
-        commentsList: [...(prev.commentsList || []), newComment]
-      }));
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100">
@@ -343,16 +292,6 @@ export default function GogteNewsPage() {
                         {newsItem.timestamp}
                       </span>
                     </div>
-                    <div className="flex items-center space-x-3">
-                      <span className="flex items-center">
-                        <Heart className="w-4 h-4 mr-1" />
-                        {newsItem.likes}
-                      </span>
-                      <span className="flex items-center">
-                        <MessageCircle className="w-4 h-4 mr-1" />
-                        {newsItem.comments}
-                      </span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -456,87 +395,8 @@ export default function GogteNewsPage() {
                 <h3 className="text-xl font-semibold text-amber-800 mb-3">Story</h3>
                 <p className="text-amber-700 leading-relaxed text-lg">{selectedNews.content}</p>
               </div>
-
-              {/* Actions */}
-              <div className="flex items-center justify-between border-t border-orange-200 pt-6">
-                <div className="flex items-center space-x-6">
-                  <button
-                    onClick={() => handleLike(selectedNews.id)}
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-colors ${
-                      selectedNews.likedBy && selectedNews.likedBy.includes('currentUser')
-                        ? 'bg-red-100 hover:bg-red-200 text-red-700'
-                        : 'bg-amber-100 hover:bg-amber-200 text-amber-700'
-                    }`}
-                  >
-                    <Heart className={`w-5 h-5 ${selectedNews.likedBy && selectedNews.likedBy.includes('currentUser') ? 'fill-current' : ''}`} />
-                    <span>{selectedNews.likes} Likes</span>
-                  </button>
-                  <span className="flex items-center space-x-2 text-amber-600">
-                    <MessageCircle className="w-5 h-5" />
-                    <span>{selectedNews.comments} Comments</span>
-                  </span>
-                </div>
-                
-                <button className="flex items-center space-x-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors">
-                  <span>Share</span>
-                </button>
-              </div>
-
-              {/* Comments Section */}
-              <div className="mt-6 border-t border-orange-200 pt-6">
-                <h3 className="text-xl font-semibold text-amber-800 mb-4">Comments</h3>
-                
-                {/* Add Comment */}
-                <div className="mb-6">
-                  <div className="flex space-x-3">
-                    <input
-                      type="text"
-                      placeholder="Write a comment..."
-                      className="flex-1 px-4 py-2 border border-orange-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && e.target.value.trim()) {
-                          handleAddComment(selectedNews.id, e.target.value.trim());
-                          e.target.value = '';
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={(e) => {
-                        const input = e.target.previousElementSibling;
-                        if (input.value.trim()) {
-                          handleAddComment(selectedNews.id, input.value.trim());
-                          input.value = '';
-                        }
-                      }}
-                      className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors flex items-center"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Comments List */}
-                <div className="space-y-4">
-                  {selectedNews.commentsList && selectedNews.commentsList.length > 0 ? (
-                    selectedNews.commentsList.map((comment) => (
-                      <div key={comment.id} className="bg-amber-50 rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-medium text-amber-800">{comment.author}</span>
-                          <span className="text-sm text-amber-600">{comment.timestamp}</span>
-                        </div>
-                        <p className="text-amber-700">{comment.text}</p>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 text-amber-600">
-                      <MessageCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                      <p>No comments yet. Be the first to comment!</p>
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
-      </div>
+          </div>
         </div>
       )}
 

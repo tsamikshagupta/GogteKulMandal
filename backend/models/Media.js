@@ -4,15 +4,34 @@ const mediaSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   description: { type: String, required: false, trim: true },
   tags: [{ type: String, trim: true }],
+  category: { type: String, required: true, trim: true },
+  photographer: { type: String, trim: true },
+  location: { type: String, trim: true },
+  eventDate: { type: Date },
+  generation: { type: String, trim: true },
+  occasion: { type: String, trim: true },
   image: {
-    url: { type: String, required: true },
-    filename: { type: String, trim: true },
-    size: { type: Number },
-    mimeType: { type: String }
+    data: { type: String, required: true }, // base64 encoded image
+    mimeType: { type: String, required: true },
+    originalName: { type: String, trim: true }
   },
-  uploaded_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  // Support for multiple images in a collection
+  imageUrls: [{
+    data: { type: String }, // base64 encoded image
+    mimeType: { type: String },
+    originalName: { type: String }
+  }],
+  isCollection: { type: Boolean, default: false },
+  photoCount: { type: Number, default: 1 },
+  likes: { type: Number, default: 0 },
+  comments: [{ 
+    user: String, 
+    text: String, 
+    timestamp: { type: Date, default: Date.now } 
+  }],
+  uploaded_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
   linked_to_id: { type: mongoose.Schema.Types.ObjectId, refPath: 'linked_to_model', required: false, default: null },
-  linked_to_model: { type: String, required: false, enum: [null, 'Event', 'News'], default: null },
+  linked_to_model: { type: String, required: false, enum: [null, 'Event', 'News', 'Gallery'], default: 'Gallery' },
   uploaded_date: { type: Date, default: Date.now }
 }, { timestamps: true });
 
